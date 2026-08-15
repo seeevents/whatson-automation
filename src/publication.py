@@ -110,7 +110,7 @@ def process_one_record(record: dict, access_token: str) -> str:
 
     try:
         response = claude_client.call_claude(
-            SYSTEM_PROMPT, user_message, max_tokens=4096, mcp_servers=mcp_servers
+            SYSTEM_PROMPT, user_message, max_tokens=8192, mcp_servers=mcp_servers
         )
     except claude_client.ClaudeError as exc:
         logger.error("Echec appel Claude/GoodBarber pour %s: %s", record_id, exc)
