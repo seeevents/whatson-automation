@@ -73,7 +73,10 @@ def call_claude(
                 raise ClaudeError(
                     "Crédit API Anthropic insuffisant - recharger sur console.anthropic.com/settings/billing"
                 )
-            resp.raise_for_status()
+            if not resp.ok:
+                # Capture le corps de la réponse pour un diagnostic précis (Anthropic renvoie
+                # un message d'erreur JSON détaillé, perdu si on se contente de raise_for_status).
+                raise ClaudeError(f"{resp.status_code} {resp.reason}: {resp.text[:1000]}")
             return resp.json()
         except requests.RequestException as exc:
             last_error = exc
