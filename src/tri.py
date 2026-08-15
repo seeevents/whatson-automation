@@ -121,9 +121,12 @@ def run() -> dict[str, int]:
     logger.info("Tri: %d ligne(s) a traiter", len(records))
 
     summary = {"Validé": 0, "Ignoré": 0, "A valider": 0}
-    for record in records:
+    total = len(records)
+    for i, record in enumerate(records, start=1):
         result = process_one_record(record)
         summary[result] = summary.get(result, 0) + 1
+        if i % 10 == 0 or i == total:
+            logger.info("Progression: %d/%d traitees (%s)", i, total, summary)
 
     logger.info("Tri termine: %s", summary)
     return summary
