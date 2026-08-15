@@ -76,7 +76,8 @@ def _get_goodbarber_access_token() -> str:
         raise RuntimeError("Aucun token GoodBarber trouvé dans Airtable (table Token Data).")
     import json as _json
 
-    token_json = records[0]["fields"].get("Token Data JSON", "{}")
+    fields = records[0]["fields"]
+    token_json = fields.get("fldjX3lvP5GYdDHnU", "{}")  # champ "Token Data JSON"
     return _json.loads(token_json).get("access_token", "")
 
 
