@@ -153,7 +153,11 @@ def process_one_record(record: dict, access_token: str) -> str:
     airtable_client.update_record(
         settings.AIRTABLE_TABLE_EVENTS,
         record_id,
-        {settings.FLD_STATUT: settings.STATUT_RAPPORTE, settings.FLD_ALERTE: message},
+        {
+            settings.FLD_STATUT: settings.STATUT_RAPPORTE,
+            settings.FLD_ALERTE: message,
+            settings.FLD_GOODBARBER_ID: str(goodbarber_id) if goodbarber_id else "",
+        },
     )
     return settings.STATUT_RAPPORTE
 

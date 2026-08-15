@@ -25,6 +25,7 @@ FLD_LEGENDE = "fldzt4EIODZJwiaPC"
 FLD_DATE = "fldplmRgkYNlWBIw8"
 FLD_IMAGE_URL = "fldMGB4o8SA4LDtkM"
 FLD_ALERTE = "flddkjVofHvZYrOKU"
+FLD_GOODBARBER_ID = "fldwtgHwaZroCLqga"
 
 # Valeurs du champ Statut (options exactes, sensibles à l'accent)
 STATUT_A_VALIDER = "A valider"
