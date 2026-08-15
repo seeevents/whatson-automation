@@ -70,6 +70,7 @@ def search_records(
         params: dict[str, Any] = {
             "filterByFormula": formula,
             "pageSize": min(100, max_records - len(records)),
+            "returnFieldsByFieldId": "true",  # sinon Airtable renvoie les champs par NOM, pas par ID
         }
         if fields:
             params["fields[]"] = fields
