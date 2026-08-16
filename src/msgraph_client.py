@@ -5,6 +5,7 @@ de Make. Lit la feuille InstaCheck.xlsx sur SharePoint via l'API Graph
 """
 from __future__ import annotations
 
+import base64
 import logging
 import time
 from typing import Any
@@ -117,3 +118,95 @@ def get_instacheck_data() -> tuple[list[list[Any]], list[list[Any]]]:
     formulas = data.get("formulas", [])
     logger.info("InstaCheck: %d ligne(s) lue(s) (dont en-tete)", len(values))
     return values, formulas
+
+
+def _extract_url_from_formula(formula: str) -> str:
+    """Extrait l'URL d'une formule =HYPERLINK("url";"texte")."""
+    if not formula or not str(formula).upper().startswith("=HYPERLINK"):
+        return ""
+    parts = str(formula).split('"')
+    return parts[1] if len(parts) >= 2 else ""
+
+
+def resolve_client_file(venue_name: str) -> dict[str, str] | None:
+    """
+    Cherche la venue dans la colonne A d'InstaCheck (lignes 9-600), recupere
+    le lien de partage vers son fichier client dedie en colonne J, et le
+    resout en identifiant reel (drive_id + item_id) via l'API Graph.
+    Retourne None si la venue n'est pas trouvee ou si le lien est invalide.
+    """
+    col_a_url = (
+        f"{GRAPH_BASE}/drives/{settings.MS_INSTACHECK_DRIVE_ID}/items/{settings.MS_INSTACHECK_ITEM_ID}"
+        f"/workbook/worksheets('{settings.MS_INSTACHECK_WORKSHEET}')/range(address='A9:A600')"
+    )
+    col_j_url = (
+        f"{GRAPH_BASE}/drives/{settings.MS_INSTACHECK_DRIVE_ID}/items/{settings.MS_INSTACHECK_ITEM_ID}"
+        f"/workbook/worksheets('{settings.MS_INSTACHECK_WORKSHEET}')/range(address='J9:J600')"
+    )
+    col_a = _request("GET", col_a_url)
+    col_j = _request("GET", col_j_url)
+
+    a_values = [str(row[0]) if row and row[0] is not None else "" for row in col_a.get("values", [])]
+    j_formulas = [str(row[0]) if row and row[0] is not None else "" for row in col_j.get("formulas", [])]
+
+    search = venue_name.strip().lower()
+    row_index = None
+    for i, v in enumerate(a_values):
+        if v and search in v.lower():
+            row_index = i
+            break
+    if row_index is None:
+        logger.info("resolve_client_file: venue '%s' non trouvee dans InstaCheck", venue_name)
+        return None
+
+    j_formula = j_formulas[row_index] if row_index < len(j_formulas) else ""
+    extracted_url = _extract_url_from_formula(j_formula)
+    if not extracted_url:
+        logger.info("resolve_client_file: pas de lien de partage pour '%s'", venue_name)
+        return None
+
+    b64 = base64.b64encode(extracted_url.encode()).decode()
+    b64 = b64.replace("+", "-").replace("/", "_").rstrip("=")
+    share_token = f"u!{b64}"
+
+    try:
+        result = _request("GET", f"{GRAPH_BASE}/shares/{share_token}/driveItem")
+    except MSGraphError as exc:
+        logger.warning("resolve_client_file: echec resolution partage pour '%s': %s", venue_name, exc)
+        return None
+
+    return {
+        "name": result.get("name", ""),
+        "item_id": result.get("id", ""),
+        "drive_id": (result.get("parentReference") or {}).get("driveId", ""),
+        "weburl": result.get("webUrl", ""),
+    }
+
+
+def report_event_to_client(drive_id: str, item_id: str, titre_event: str, date_event: str) -> bool:
+    """
+    Ecrit une nouvelle ligne d'evenement dans l'onglet PLANNING du fichier
+    client resolu (premiere ligne vide entre B17 et B60). Retourne False
+    en cas d'echec (sans lever d'exception - best-effort, comme sur Make).
+    """
+    try:
+        range_url = (
+            f"{GRAPH_BASE}/drives/{drive_id}/items/{item_id}"
+            f"/workbook/worksheets('PLANNING')/range(address='B17:B60')"
+        )
+        result = _request("GET", range_url)
+        value_types = result.get("valueTypes", [])
+        flat = [row[0] if row else "Empty" for row in value_types]
+        non_empty_count = sum(1 for v in flat if v != "Empty")
+        target_row = non_empty_count + 17
+
+        write_url = (
+            f"{GRAPH_BASE}/drives/{drive_id}/items/{item_id}"
+            f"/workbook/worksheets('PLANNING')/range(address='A{target_row}:I{target_row}')"
+        )
+        body = {"values": [["Event", titre_event, date_event, "", "", "", "", "", False]]}
+        _request("PATCH", write_url, json=body)
+        return True
+    except MSGraphError as exc:
+        logger.warning("report_event_to_client: echec ecriture: %s", exc)
+        return False

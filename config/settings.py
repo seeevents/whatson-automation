@@ -16,6 +16,17 @@ AIRTABLE_TABLE_EVENTS = "tblOfzsSmciMWOwnB"          # Events_Collectes
 AIRTABLE_TABLE_TRACKING = "tblfbpkOy0n6f6qej"        # Events_Tracking
 AIRTABLE_TABLE_TOKENS = "tblCmAXfdDhhLYIeB"          # Token Data (GoodBarber OAuth)
 
+# Field IDs (table Events_Tracking)
+FLD_TRACK_STATUS = "fldGd8BsmT5vgeY3F"
+FLD_TRACK_TITLE_AT_VENUE = "fldcJo5v9sVjBNFGm"
+FLD_TRACK_INSTAGRAM_URL = "fldcRx0YCqfMBjUmG"
+FLD_TRACK_VENUE = "fldg8ax8wrgsk9twP"
+FLD_TRACK_DATE = "fldkx2z1fXuOobKXu"
+FLD_TRACK_MESSAGE = "fldmSH6sx0NuhHUCD"
+FLD_TRACK_CLIENT_WEBURL = "fldp6sGqgnR2wLyd7"
+FLD_TRACK_GOODBARBER_ID = "fldwtAzoNcUIq7WS2"
+FLD_TRACK_EDIT_URL = "fldxaBqVObPdBBCry"
+
 # Field IDs (table Events_Collectes) - copiés depuis les blueprints Make existants
 FLD_STATUT = "fldL0NhT0BDiEFLSz"
 FLD_TITRE = "fldb8n3QgyamRNLC4"
@@ -69,6 +80,9 @@ MS_TENANT_ID = os.environ.get("MICROSOFT_TENANT_ID", "")
 MS_SITE_ID = "seebalichronicles.sharepoint.com,fd4c4a64-5470-4400-a960-5b7a3656240a,551586c5-de85-480d-b3b0-fc06a902d5ff"
 MS_INSTACHECK_FILENAME = "InstaCheck.xlsx"
 MS_INSTACHECK_WORKSHEET = "InstaCheck"
+# IDs stables confirmes via les blueprints Make existants (evite une recherche par nom a chaque appel)
+MS_INSTACHECK_DRIVE_ID = "b!ZEpM_XBUAESpYFt6NlYkCsWGFVWF3g1Is7D8BqkC1f-rcu1dQUyUSoarWrTnKjA9"
+MS_INSTACHECK_ITEM_ID = "01WDGNM5FVNBVIOWJBVBHI6SAT5TFHDL4D"
 
 # --- Gemini Vision (fallback OCR stories/posts sans date) ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")

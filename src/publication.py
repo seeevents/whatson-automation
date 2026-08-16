@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 
 from config import settings
-from src import airtable_client, claude_client
+from src import airtable_client, claude_client, msgraph_client
 
 logger = logging.getLogger("whatson.publication")
 
@@ -159,7 +159,57 @@ def process_one_record(record: dict, access_token: str) -> str:
             settings.FLD_GOODBARBER_ID: str(goodbarber_id) if goodbarber_id else "",
         },
     )
+    _report_to_client_and_tracking(record, status, message, goodbarber_id)
     return settings.STATUT_RAPPORTE
+
+
+def _report_to_client_and_tracking(
+    record: dict, status: str, message: str, goodbarber_id: str
+) -> None:
+    """
+    Best-effort: resout le fichier client de la venue, y ecrit l'event,
+    et logue le tout dans Events_Tracking. N'importe quel echec ici est
+    capture et logue, mais ne fait jamais echouer la publication elle-meme
+    (deja actee sur GoodBarber a ce stade).
+    """
+    f = record["fields"]
+    venue_name = f.get(settings.FLD_VENUE_NAME, "")
+    titre = f.get(settings.FLD_TITRE, "")
+    date = f.get(settings.FLD_DATE, "")
+    instagram = f.get(settings.FLD_INSTAGRAM, "")
+
+    resolved_weburl = ""
+    try:
+        resolved = msgraph_client.resolve_client_file(venue_name)
+        if resolved and resolved["name"] not in ("Events_Tracking.xlsx", "InstaCheck.xlsx") and status != "ERROR":
+            resolved_weburl = resolved.get("weburl", "")
+            msgraph_client.report_event_to_client(
+                resolved["drive_id"], resolved["item_id"], titre, date
+            )
+    except Exception:
+        logger.exception("Echec resolution/ecriture fichier client pour '%s' - on continue", venue_name)
+
+    edit_url = ""
+    if status != "ERROR" and goodbarber_id:
+        edit_url = f"https://www.see.events/manage/cms/agenda/{goodbarber_id}/edit/"
+
+    try:
+        airtable_client.create_record(
+            settings.AIRTABLE_TABLE_TRACKING,
+            {
+                settings.FLD_TRACK_STATUS: status,
+                settings.FLD_TRACK_TITLE_AT_VENUE: f"{titre} at {venue_name}",
+                settings.FLD_TRACK_INSTAGRAM_URL: f"https://www.instagram.com/{instagram}/" if instagram else "",
+                settings.FLD_TRACK_VENUE: venue_name,
+                settings.FLD_TRACK_DATE: date,
+                settings.FLD_TRACK_MESSAGE: message,
+                settings.FLD_TRACK_CLIENT_WEBURL: resolved_weburl,
+                settings.FLD_TRACK_GOODBARBER_ID: str(goodbarber_id) if goodbarber_id else "",
+                settings.FLD_TRACK_EDIT_URL: edit_url,
+            },
+        )
+    except Exception:
+        logger.exception("Echec ecriture Events_Tracking pour '%s' - on continue", venue_name)
 
 
 def run(dry_run_record_ids: list[str] | None = None) -> dict[str, int]:
