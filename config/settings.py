@@ -59,6 +59,25 @@ CAT_TOP_EVENTS = "10683231"  # jamais touchée automatiquement
 # --- Apify (Brique 3) ---
 APIFY_API_TOKEN = os.environ.get("APIFY_API_TOKEN", "")
 APIFY_DATASET_PREFIX = "seeeventsbali~whatson-batch-"  # batch-1 à batch-8
+APIFY_ACTOR_POSTS = "shu8hvrXbJbY3Eb9W"
+APIFY_ACTOR_STORIES = "gzUBexxCCcFGpHSSQ"
+
+# --- Microsoft Graph (SharePoint / InstaCheck.xlsx) ---
+MS_CLIENT_ID = os.environ.get("MICROSOFT_CLIENT_ID", "")
+MS_CLIENT_SECRET = os.environ.get("MICROSOFT_CLIENT_SECRET", "")
+MS_TENANT_ID = os.environ.get("MICROSOFT_TENANT_ID", "")
+MS_SITE_ID = "seebalichronicles.sharepoint.com,fd4c4a64-5470-4400-a960-5b7a3656240a,551586c5-de85-480d-b3b0-fc06a902d5ff"
+MS_INSTACHECK_FILENAME = "InstaCheck.xlsx"
+MS_INSTACHECK_WORKSHEET = "InstaCheck"
+
+# --- Gemini Vision (fallback OCR stories/posts sans date) ---
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = "gemini-3.6-flash"
+
+# --- Dedup tracking (table Airtable separee, evite de retraiter le meme post/story) ---
+AIRTABLE_TABLE_DEDUP = "tblITBraE4pexB4Cy"
+FLD_DEDUP_DATE = "fldnUzBaDpTg0RVa8"
+FLD_DEDUP_URL = "fldvz9Jhk6sQwn3mK"
 
 # --- Traitement par lot ---
 MAX_RECORDS_PER_RUN = 500  # marge large sous la limite de temps GitHub Actions (6h)
