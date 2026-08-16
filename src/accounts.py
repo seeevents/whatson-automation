@@ -43,8 +43,14 @@ def _extract_url_from_hyperlink_formula(formula: str) -> str:
     return url.split("?")[0]
 
 
-def get_todays_accounts() -> list[Account]:
-    """Retourne la liste des comptes a traiter aujourd'hui."""
+def get_todays_accounts(batch_number: str | None = None) -> list[Account]:
+    """
+    Retourne la liste des comptes a traiter aujourd'hui.
+    Si batch_number est fourni ("1" a "8"), ne retourne que les comptes de
+    CE batch (reproduit le decoupage Make pour permettre l'execution
+    parallele des 8 batches). Si None, retourne TOUS les comptes du jour
+    tous batches confondus (mode sequentiel complet).
+    """
     values, formulas = msgraph_client.get_instacheck_data()
     if not values:
         return []
@@ -62,14 +68,15 @@ def get_todays_accounts() -> list[Account]:
 
         model = cell(COL_MODEL, row)
         weekday = cell(COL_WEEKDAY, row)
-        batch_number = cell(COL_BATCH_NUMBER, row)
+        row_batch_number = cell(COL_BATCH_NUMBER, row)
 
         if "Claude" not in model:
             continue
         if weekday not in ("Everyday", today_weekday):
             continue
-        if batch_number not in ("1", "2", "3", "4", "5", "6", "7", "8"):
-            # Pas de numero de batch valide assigne = compte non actif/non configure
+        if row_batch_number not in ("1", "2", "3", "4", "5", "6", "7", "8"):
+            continue
+        if batch_number is not None and row_batch_number != batch_number:
             continue
 
         venue_name = cell(COL_VENUE_NAME, row)
@@ -81,5 +88,6 @@ def get_todays_accounts() -> list[Account]:
 
         accounts.append(Account(venue_name=venue_name, instagram_url=instagram_url))
 
-    logger.info("Comptes retenus pour aujourd'hui (%s): %d", today_weekday, len(accounts))
+    label = f"batch {batch_number}" if batch_number else "tous batches"
+    logger.info("Comptes retenus pour aujourd'hui (%s, %s): %d", today_weekday, label, len(accounts))
     return accounts

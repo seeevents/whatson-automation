@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Lance Brique 3 sur TOUS les comptes retenus pour aujourd'hui. Usage: python scripts/run_batch.py"""
+"""
+Lance Brique 3 sur les comptes du jour.
+Usage: python scripts/run_batch.py [numero_batch]
+Si numero_batch (1-8) est fourni, ne traite que ce sous-ensemble (permet
+l'execution parallele des 8 batches, comme sur Make). Sans argument,
+traite TOUS les comptes du jour sequentiellement.
+"""
 import logging
 import sys
 import time
@@ -23,7 +29,11 @@ def main() -> int:
         logger.error("Variables d'environnement manquantes: %s", ", ".join(missing))
         return 1
 
-    todays_accounts = accounts.get_todays_accounts()
+    batch_number = sys.argv[1] if len(sys.argv) > 1 else None
+    if batch_number:
+        logger.info("Mode batch unique: %s", batch_number)
+
+    todays_accounts = accounts.get_todays_accounts(batch_number=batch_number)
     total = len(todays_accounts)
     logger.info("Batch: %d compte(s) a traiter aujourd'hui", total)
 
