@@ -1,0 +1,35 @@
+name: WhatsOn - Test Brique 3 (un compte)
+
+on:
+  workflow_dispatch:
+    inputs:
+      instagram_url:
+        description: "URL du compte Instagram (ex: https://www.instagram.com/afterrockbali/)"
+        required: true
+        type: string
+      venue_name:
+        description: "Nom de la venue"
+        required: true
+        type: string
+
+jobs:
+  test-one-account:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dependances
+        run: pip install -r requirements.txt
+
+      - name: Tester Brique 3 sur un compte
+        env:
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python scripts/test_one_account.py "${{ inputs.instagram_url }}" "${{ inputs.venue_name }}"
