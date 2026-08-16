@@ -22,7 +22,7 @@ COL_VENUE_NAME = 0   # A
 COL_MODEL = 1        # B
 COL_WEEKDAY = 5      # F
 COL_INSTAGRAM_URL = 7  # H
-COL_ACTIVE = 17       # R
+COL_BATCH_NUMBER = 17  # R - numero de batch assigne (1 a 8 sur Make), PAS un flag actif/inactif
 
 
 @dataclass
@@ -62,13 +62,14 @@ def get_todays_accounts() -> list[Account]:
 
         model = cell(COL_MODEL, row)
         weekday = cell(COL_WEEKDAY, row)
-        active = cell(COL_ACTIVE, row)
+        batch_number = cell(COL_BATCH_NUMBER, row)
 
         if "Claude" not in model:
             continue
         if weekday not in ("Everyday", today_weekday):
             continue
-        if active != "1":
+        if batch_number not in ("1", "2", "3", "4", "5", "6", "7", "8"):
+            # Pas de numero de batch valide assigne = compte non actif/non configure
             continue
 
         venue_name = cell(COL_VENUE_NAME, row)
