@@ -22,4 +22,7 @@ jobs:
           AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+          MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
+          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
+          MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
         run: python scripts/run_publication.py
