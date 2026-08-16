@@ -67,7 +67,13 @@ def _request(method: str, url: str, **kwargs) -> dict[str, Any]:
         try:
             resp = requests.request(method, url, headers=_headers(), timeout=60, **kwargs)
             if resp.status_code == 429:
-                wait = int(resp.headers.get("Retry-After", 5))
+                retry_after_raw = resp.headers.get("Retry-After", "5")
+                try:
+                    # Retry-After peut contenir plusieurs valeurs separees par virgule
+                    # (observe en cas de rate-limit simultane sur plusieurs jobs paralleles)
+                    wait = int(retry_after_raw.split(",")[0].strip())
+                except (ValueError, AttributeError):
+                    wait = 5
                 logger.warning("Graph rate-limit (429), retry dans %ss", wait)
                 time.sleep(wait)
                 continue
