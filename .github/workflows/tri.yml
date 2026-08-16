@@ -4,6 +4,7 @@ on:
   workflow_dispatch: {}
   schedule:
     - cron: "40 4 * * *"  # 12:40 Bali (UTC+8), apres la fin normale des 8 batches
+    - cron: "55 4 * * *"  # 12:55 Bali, filet de securite si volume important
 
 jobs:
   tri:

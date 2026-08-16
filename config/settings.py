@@ -94,7 +94,7 @@ FLD_DEDUP_DATE = "fldnUzBaDpTg0RVa8"
 FLD_DEDUP_URL = "fldvz9Jhk6sQwn3mK"
 
 # --- Traitement par lot ---
-MAX_RECORDS_PER_RUN = 500  # marge large sous la limite de temps GitHub Actions (6h)
+MAX_RECORDS_PER_RUN = 1000  # marge large sous la limite de temps GitHub Actions (6h)
 
 
 def validate_config() -> list[str]:
