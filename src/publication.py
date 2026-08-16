@@ -9,6 +9,7 @@ Publie chaque ligne "Validé" sur GoodBarber via l'agent Claude + MCP
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 
 from config import settings
 from src import airtable_client, claude_client, msgraph_client
@@ -53,7 +54,7 @@ Etape 4 (Contenu du texte) :
   1. Lis le texte source pour toute mention d'heure (ex: "5pm", "doors at 7", "des 18h"). N'utilise allDay=true QUE si aucune heure n'apparait dans le texte.
   2. CONVERSION UTC+8 (Bali) vers UTC+2 (GoodBarber) : Soustrais STRICTEMENT 6 heures a l'heure de Bali trouvee avant d'envoyer la valeur a GoodBarber (ex: 19h Bali -> 13h GoodBarber). Si la soustraction donne une heure negative (ex: 02h Bali - 6h = 20h), fais passer la date de debut au jour CALENDAIRE PRECEDENT et utilise 20h ce jour-la. Ignore l'heure des anciens contenus.
 - DATES SANS DATE EXACTE : Si aucun jour exact n'est fourni mais qu'un jour de la semaine est mentionne (ex: "this Saturday", "MERCREDI"), calcule la prochaine occurrence de ce jour a partir de la date du jour.
-- CATEGORIES FIXES : Today=10679997, This Week=10679998, Later=10680000, DJ=16725017, Food=10680003, Kids=10680004, Art=10680005, Sport=10680006, Dance=10680007, Wellness=10680008, Other=10680009. N'attribue un type que si le contenu le justifie clairement, sinon Other.
+- CATEGORIES FIXES : Today=10679997, This Week=10679998, Later=10680000, DJ=16725017, Food=10680003, Kids=10680004, Art=10680005, Sport=10680006, Dance=10680007, Wellness=10680008, Other=10680009. La categorie de DATE (Today/This Week/Later) t'est TOUJOURS fournie deja calculee dans le message utilisateur - utilise-la telle quelle, ne la recalcule JAMAIS toi-meme a partir de la date brute. N'attribue une categorie de TYPE (DJ/Food/etc.) que si le contenu le justifie clairement, sinon Other.
 - TITRE : Format strict "{Nom de l'evenement} at {Nom de la venue}".
 - META TITLE (champ meta.title, a fournir a CHAQUE cms_create_event ET cms_update_event, sans exception) : Format strict "{Nom de l'evenement} at {Nom de la venue} by SEE Events Bali". Lors d'une mise a jour (reutilisation d'un event existant), REMPLACE TOUJOURS l'ancien meta.title par cette valeur recalculee a partir du titre ACTUEL - ne le laisse jamais tel quel ni vide.
 - SLUG (champ slug, URL de l'event) : A CHAQUE cms_update_event (reutilisation d'un event existant), genere et envoie TOUJOURS un nouveau slug derive du titre ACTUEL de l'evenement (tout en minuscules, espaces et caracteres speciaux/accents remplaces par des tirets). Ne laisse JAMAIS l'ancien slug herite de l'event precedent. Lors d'un cms_create_event, fournis ce meme slug calcule.
@@ -81,11 +82,39 @@ def _get_goodbarber_access_token() -> str:
     return _json.loads(token_json).get("access_token", "")
 
 
+def _compute_date_category(event_date_str: str) -> str:
+    """
+    Reproduit exactement la formule Make de calcul de categorie de date :
+    - Today si la date de l'event = aujourd'hui (heure Bali)
+    - This Week si la date est <= fin de la semaine calendaire en cours (dimanche)
+    - Later sinon
+    """
+    if not event_date_str:
+        return "Later"
+    try:
+        event_date = datetime.strptime(str(event_date_str)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return "Later"
+
+    today = datetime.now(settings.BALI_TZ).date()
+    if event_date == today:
+        return "Today"
+
+    days_until_sunday = 7 - today.isoweekday()  # isoweekday: lundi=1 ... dimanche=7
+    end_of_week = today + timedelta(days=days_until_sunday)
+    if event_date <= end_of_week:
+        return "This Week"
+    return "Later"
+
+
 def _build_user_message(record: dict) -> str:
     f = record["fields"]
+    date_event = f.get(settings.FLD_DATE, "")
+    categorie = _compute_date_category(date_event)
     return (
         f"Titre : {f.get(settings.FLD_TITRE, '')}\n"
-        f"Date de l'evenement : {f.get(settings.FLD_DATE, '')}\n"
+        f"Date de l'evenement : {date_event}\n"
+        f"Categorie de date calculee (a utiliser telle quelle, ne la recalcule pas toi-meme) : {categorie}\n"
         f"Nom de la venue : {f.get(settings.FLD_VENUE_NAME, '')}\n"
         f"Compte Instagram (repli si le nom de venue ne donne aucun resultat) : {f.get(settings.FLD_INSTAGRAM, '')}\n"
         f"Texte / legende d'origine : {f.get(settings.FLD_LEGENDE, '')}\n"
