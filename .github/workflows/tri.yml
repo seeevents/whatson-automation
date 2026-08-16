@@ -2,6 +2,8 @@ name: WhatsOn - Tri Automatisé
 
 on:
   workflow_dispatch: {}
+  schedule:
+    - cron: "40 4 * * *"  # 12:40 Bali (UTC+8), apres la fin normale des 8 batches
 
 jobs:
   tri:

@@ -2,6 +2,10 @@ name: WhatsOn - Publication GoodBarber
 
 on:
   workflow_dispatch: {}
+  schedule:
+    - cron: "0 5 * * *"   # 13:00 Bali
+    - cron: "50 5 * * *"  # 13:50 Bali
+    - cron: "40 6 * * *"  # 14:40 Bali
 
 jobs:
   publication:

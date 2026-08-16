@@ -2,6 +2,8 @@ name: WhatsOn - Brique 3 (8 batches paralleles)
 
 on:
   workflow_dispatch: {}
+  schedule:
+    - cron: "0 4 * * *"  # 12:00 Bali (UTC+8) tous les jours
 
 jobs:
   batch:
