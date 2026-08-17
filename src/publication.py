@@ -16,7 +16,10 @@ from src import airtable_client, claude_client, msgraph_client
 
 logger = logging.getLogger("whatson.publication")
 
-SYSTEM_PROMPT = """Tu es un agent d'integration de donnees strict. Ton role est de publier UN SEUL evenement dans l'app GoodBarber via les outils MCP mis a ta disposition. Tu traites une seule ligne, sans memoire d'aucun autre appel precedent ou suivant.
+SYSTEM_PROMPT = """Tu es un agent d'integration de donnees strict. Ton role est de publier UN SEUL evenement dans l'app GoodBarber via les outils MCP mis a ta disposition. Tu traites soit UNE ligne source, soit PLUSIEURS lignes sources regroupees (meme venue, meme date - typiquement un festival multi-posts), sans memoire d'aucun autre appel precedent ou suivant.
+
+## CAS MULTI-SOURCES (plusieurs posts pour le meme evenement/venue/date)
+Si le message utilisateur contient plusieurs blocs "--- Source N ---" : c'est qu'un meme evenement (festival, soiree a plusieurs artistes/exposants) a genere plusieurs posts Instagram distincts. Dans ce cas UNIQUEMENT, la regle TEXTE ORIGINAL ne s'applique pas telle quelle : tu dois SYNTHETISER intelligemment tous les elements cles de CHAQUE source (line-up complet, tous les artistes/exposants mentionnes, informations pratiques) en UN SEUL texte cohesif qui couvre l'ensemble - ne copie pas une seule source et n'ignore pas les autres. Choisis le titre le plus generique/descriptif de l'evenement global (pas le nom d'un seul artiste) pour le champ Titre. Choisis UNE SEULE image parmi celles fournies (la plus representative de l'evenement global, pas d'un artiste en particulier).
 
 ## REGLE D'OR - DEDOUBLONNAGE (a ne jamais enfreindre)
 Ne cree JAMAIS un nouvel evenement (cms_create_event) si la venue possede DEJA au moins un evenement sur GoodBarber, meme ancien ou expire.
@@ -42,12 +45,14 @@ Etape 3 (Creation si l'evenement n'existe pas) :
 - Execute cms_create_event avec la categorie de date fournie, le titre, SEO, et l'Image URL.
 
 Etape 4 (Contenu du texte) :
-- Le contenu de ce paragraphe DOIT etre la legende/texte d'origine fournie dans le champ "Texte / legende d'origine" du message utilisateur, copiee MOT POUR MOT (voir regle TEXTE ORIGINAL ci-dessous) - ne redige JAMAIS un texte toi-meme sauf si ce champ est vide ou totalement inexploitable. Le mot "NOUVEAU" designe ici uniquement le nouveau BLOC paragraphe technique a creer sur GoodBarber (car l'event n'en a pas encore) - cela ne signifie PAS qu'il faut rediger un texte nouveau ou reformule. Ajoute ce texte via cms_create_event_paragraph, avec tout le contenu textuel enveloppe dans des balises <span style="color:#FFFFFF">texte</span>.
+- CAS NORMAL (une seule source) : le contenu de ce paragraphe DOIT etre la legende/texte d'origine fournie, copiee MOT POUR MOT (voir regle TEXTE ORIGINAL ci-dessous) - ne redige JAMAIS un texte toi-meme sauf si ce champ est vide ou totalement inexploitable.
+- CAS MULTI-SOURCES : utilise le texte de synthese que tu as construit (voir section CAS MULTI-SOURCES ci-dessus).
+Le mot "NOUVEAU" designe ici uniquement le nouveau BLOC paragraphe technique a creer sur GoodBarber (car l'event n'en a pas encore) - cela ne signifie PAS qu'il faut rediger un texte nouveau ou reformule dans le cas normal. Ajoute ce texte via cms_create_event_paragraph, avec tout le contenu textuel enveloppe dans des balises <span style="color:#FFFFFF">texte</span>.
 
 ## AUTRES REGLES METIER
 
 - PERIMETRE GEOGRAPHIQUE : Verifie que l'evenement a bien lieu A BALI. Si le texte source indique clairement un lieu hors de Bali, ne cree/mets a jour aucun evenement -> reponds avec status="ERROR" et explique la raison dans "message".
-- TEXTE ORIGINAL (PRIORITE ABSOLUE) : Le champ "Texte / legende d'origine" fourni dans le message utilisateur contient la legende REELLE du post Instagram. Si ce champ n'est PAS vide, tu DOIS copier ce texte MOT POUR MOT comme contenu du paragraphe - ne le reformule JAMAIS, ne le resume JAMAIS, ne le remplace JAMAIS par ta propre version, meme si tu penses pouvoir faire mieux ou plus clair. Ne redige un texte toi-meme QUE si ce champ est litteralement vide (chaine vide) ou totalement inexploitable (ex : uniquement des emojis sans aucun sens, caracteres corrompus).
+- TEXTE ORIGINAL (PRIORITE ABSOLUE, cas normal une seule source uniquement) : Le champ "Texte / legende d'origine" fourni dans le message utilisateur contient la legende REELLE du post Instagram. Si ce champ n'est PAS vide, tu DOIS copier ce texte MOT POUR MOT comme contenu du paragraphe - ne le reformule JAMAIS, ne le resume JAMAIS, ne le remplace JAMAIS par ta propre version, meme si tu penses pouvoir faire mieux ou plus clair. Ne redige un texte toi-meme QUE si ce champ est litteralement vide (chaine vide) ou totalement inexploitable (ex : uniquement des emojis sans aucun sens, caracteres corrompus). Cette regle ne s'applique PAS au cas multi-sources (voir section dediee en haut du prompt).
 - SEO META DESCRIPTION : Genere une meta description SEO de 120 caracteres max en anglais avec des mots-cles longue traine, puis ajoute " #seeeventsbali #ifyouseeyouknow" a la fin.
 - URL EVENT : Toujours l'URL du compte Instagram (https://www.instagram.com/{compte}/), jamais une URL de post.
 - HEURE ET FUSEAU HORAIRE :
@@ -241,9 +246,104 @@ def _report_to_client_and_tracking(
         logger.exception("Echec ecriture Events_Tracking pour '%s' - on continue", venue_name)
 
 
+def _build_grouped_user_message(records: list[dict]) -> str:
+    """Construit un message utilisateur multi-sources pour un groupe de
+    lignes partageant la meme venue + meme date (typiquement un festival)."""
+    first = records[0]["fields"]
+    date_event = first.get(settings.FLD_DATE, "")
+    categorie = _compute_date_category(date_event)
+
+    header = (
+        f"Date de l'evenement : {date_event}\n"
+        f"Categorie de date calculee (a utiliser telle quelle, ne la recalcule pas toi-meme) : {categorie}\n"
+        f"Nom de la venue : {first.get(settings.FLD_VENUE_NAME, '')}\n"
+        f"Compte Instagram (repli si le nom de venue ne donne aucun resultat) : {first.get(settings.FLD_INSTAGRAM, '')}\n\n"
+        f"ATTENTION : {len(records)} posts distincts detectes pour cette meme venue/date - "
+        f"synthetise-les en UN SEUL evenement (voir section CAS MULTI-SOURCES du prompt systeme).\n"
+    )
+    sources = []
+    for i, record in enumerate(records, start=1):
+        f = record["fields"]
+        sources.append(
+            f"--- Source {i} ---\n"
+            f"Titre : {f.get(settings.FLD_TITRE, '')}\n"
+            f"Texte / legende d'origine : {f.get(settings.FLD_LEGENDE, '')}\n"
+            f"Image URL : {f.get(settings.FLD_IMAGE_URL, '')}\n"
+        )
+    return header + "\n" + "\n".join(sources)
+
+
+def process_grouped_records(records: list[dict], access_token: str) -> str:
+    """
+    Publie un groupe de lignes partageant la meme venue + date (festival
+    multi-posts) comme UN SEUL evenement de synthese, puis marque TOUTES
+    les lignes du groupe avec le meme resultat.
+    """
+    venue_name = records[0]["fields"].get(settings.FLD_VENUE_NAME, "")
+    user_message = _build_grouped_user_message(records)
+
+    mcp_servers = [
+        {
+            "type": "url",
+            "url": settings.GOODBARBER_MCP_URL,
+            "name": "goodbarber",
+            "authorization_token": access_token,
+        }
+    ]
+
+    try:
+        response = claude_client.call_claude(
+            SYSTEM_PROMPT, user_message, max_tokens=8192, mcp_servers=mcp_servers
+        )
+        decision = claude_client.extract_json_from_response(response)
+    except (claude_client.ClaudeError,) as exc:
+        logger.error("Echec appel Claude/GoodBarber (groupe '%s', %d lignes): %s", venue_name, len(records), exc)
+        for record in records:
+            airtable_client.update_record(
+                settings.AIRTABLE_TABLE_EVENTS,
+                record["id"],
+                {
+                    settings.FLD_STATUT: settings.STATUT_VALIDE,
+                    settings.FLD_ALERTE: f"ECHEC AUTOMATIQUE (Publication groupee) : {exc}. A traiter manuellement.",
+                },
+            )
+        return settings.STATUT_VALIDE
+
+    status = decision.get("status", "ERROR")
+    message = decision.get("message", "")
+    goodbarber_id = decision.get("goodbarber_id", "")
+
+    final_status = settings.STATUT_A_VALIDER if status == "ERROR" else settings.STATUT_RAPPORTE
+    for record in records:
+        fields = {settings.FLD_STATUT: final_status, settings.FLD_ALERTE: message}
+        if final_status == settings.STATUT_RAPPORTE:
+            fields[settings.FLD_GOODBARBER_ID] = str(goodbarber_id) if goodbarber_id else ""
+        airtable_client.update_record(settings.AIRTABLE_TABLE_EVENTS, record["id"], fields)
+
+    if final_status == settings.STATUT_RAPPORTE:
+        # Un seul log tracking + reporting client pour le groupe (evite les doublons de reporting)
+        _report_to_client_and_tracking(records[0], status, message, goodbarber_id)
+
+    logger.info(
+        "Groupe traite: '%s' (%d lignes fusionnees) -> %s", venue_name, len(records), final_status
+    )
+    return final_status
+
+
+def _group_key(record: dict) -> tuple[str, str]:
+    f = record["fields"]
+    venue = str(f.get(settings.FLD_VENUE_NAME, "")).strip().lower()
+    date = str(f.get(settings.FLD_DATE, "")).strip()
+    return (venue, date)
+
+
 def run(dry_run_record_ids: list[str] | None = None) -> dict[str, int]:
     """
     Publie toutes les lignes 'Validé' actuelles.
+    Les lignes partageant la meme venue + meme date sont regroupees et
+    publiees comme UN SEUL evenement de synthese (evite d'ecraser
+    plusieurs fois le meme container GoodBarber avec des contenus
+    differents - cas des festivals multi-posts).
     Si `dry_run_record_ids` est fourni, ne traite QUE ces IDs précis
     (utilisé pour tester sur des enregistrements isolés, sans toucher
     à la vraie file de production).
@@ -266,13 +366,29 @@ def run(dry_run_record_ids: list[str] | None = None) -> dict[str, int]:
 
     logger.info("Publication: %d ligne(s) a traiter", len(records))
 
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for record in records:
+        key = _group_key(record)
+        groups.setdefault(key, []).append(record)
+
+    n_grouped = sum(1 for g in groups.values() if len(g) > 1)
+    if n_grouped:
+        logger.info(
+            "%d groupe(s) multi-sources detecte(s) (memes venue+date), %d ligne(s) au total dans ces groupes",
+            n_grouped,
+            sum(len(g) for g in groups.values() if len(g) > 1),
+        )
+
     summary: dict[str, int] = {}
-    total = len(records)
-    for i, record in enumerate(records, start=1):
-        result = process_one_record(record, access_token)
+    total_units = len(groups)
+    for i, group in enumerate(groups.values(), start=1):
+        if len(group) == 1:
+            result = process_one_record(group[0], access_token)
+        else:
+            result = process_grouped_records(group, access_token)
         summary[result] = summary.get(result, 0) + 1
-        if i % 10 == 0 or i == total:
-            logger.info("Progression: %d/%d traitees (%s)", i, total, summary)
+        if i % 10 == 0 or i == total_units:
+            logger.info("Progression: %d/%d unite(s) traitees (%s)", i, total_units, summary)
 
     logger.info("Publication terminee: %s", summary)
     return summary
