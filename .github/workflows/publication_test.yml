@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       record_id:
-        description: "ID de l'enregistrement Airtable a tester (ex: recXXXXXXXXXXXXXX) - un seul, jamais la vraie file"
+        description: "ID(s) Airtable a tester - un seul, ou plusieurs separes par des espaces (ex: recAAA recBBB)"
         required: true
         type: string
 
@@ -30,4 +30,4 @@ jobs:
           MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
           MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
           MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
-        run: python scripts/run_publication_test.py "${{ inputs.record_id }}"
+        run: python scripts/run_publication_test.py ${{ inputs.record_id }}
