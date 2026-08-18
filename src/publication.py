@@ -257,6 +257,7 @@ def _report_to_client_and_tracking(
                 settings.FLD_TRACK_GOODBARBER_ID: str(goodbarber_id) if goodbarber_id else "",
                 settings.FLD_TRACK_EDIT_URL: edit_url,
             },
+            typecast=True,
         )
     except Exception:
         logger.exception("Echec ecriture Events_Tracking pour '%s' - on continue", venue_name)

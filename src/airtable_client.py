@@ -94,10 +94,15 @@ def update_record(table_id: str, record_id: str, fields: dict[str, Any]) -> dict
     return _request("PATCH", url, json={"fields": fields})
 
 
-def create_record(table_id: str, fields: dict[str, Any]) -> dict[str, Any]:
-    """Crée un nouvel enregistrement."""
+def create_record(table_id: str, fields: dict[str, Any], typecast: bool = False) -> dict[str, Any]:
+    """Crée un nouvel enregistrement. typecast=True autorise Airtable a creer
+    automatiquement une nouvelle option sur un champ Single Select si la
+    valeur envoyee n'existe pas encore dans la liste (sinon rejet silencieux/erreur)."""
     url = f"{BASE_URL}/{AIRTABLE_BASE_ID}/{table_id}"
-    return _request("POST", url, json={"fields": fields})
+    body: dict[str, Any] = {"fields": fields}
+    if typecast:
+        body["typecast"] = True
+    return _request("POST", url, json=body)
 
 
 def batch_update_records(table_id: str, updates: list[dict[str, Any]]) -> list[dict[str, Any]]:
