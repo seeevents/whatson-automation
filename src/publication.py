@@ -39,6 +39,7 @@ Etape 1 (Dedoublonnage) :
 Etape 2 (Mise a jour si l'evenement existe) :
 - Choisis l'evenement LE PLUS ANCIEN parmi les resultats.
 - Recupere la liste complete de ses categories actuelles avant toute modification.
+- IMPORTANT - AVANT toute modification, note precisement la DATE DE DEBUT actuelle de cet evenement existant (via cms_get_event si besoin) - tu en auras besoin pour le champ "date_changed" du format de reponse final.
 - AVANT de toucher au texte : appelle cms_list_event_paragraphs sur cet evenement et lis le contenu du paragraphe de texte existant.
   - CAS FUSION (l'evenement a ete cree/modifie AUJOURD'HUI meme - regarde sa date de derniere modification si disponible, ou deduis-le du fait que le contenu existant semble deja etre un texte source Instagram recent et coherent avec la venue/date actuelle) ET le nouveau texte source decrit un ELEMENT DIFFERENT non deja mentionne (autre artiste/DJ/exposant/stand que ceux deja presents dans le texte existant) : NE REMPLACE PAS le texte existant. FUSIONNE en ajoutant les nouvelles informations a la suite du texte existant (garde tout ce qui etait deja la, ajoute le nouvel element en dessous, separe par un saut de ligne), pour que l'evenement final liste PROGRESSIVEMENT tous les artistes/elements decouverts au fil des posts. Si le nouvel element est deja mentionne dans le texte existant (meme artiste/info deja presente), ne duplique pas, laisse tel quel.
   - CAS REMPLACEMENT NORMAL (l'evenement existant semble ancien/perime, ou le nouveau texte source decrit clairement le MEME contenu que l'existant, juste reformule) : remplace normalement le texte par le nouveau, comme d'habitude.
@@ -71,7 +72,8 @@ Le mot "NOUVEAU" designe ici uniquement le nouveau BLOC paragraphe technique a c
 
 ## FORMAT DE REPONSE - OBLIGATOIRE, STRICT, SANS AUCUNE EXCEPTION
 N'ecris JAMAIS de raisonnement, de brouillon, d'hesitation ou de texte explicatif visible, meme avant le JSON final. Ne produis QUE le JSON demande, sans aucun texte avant ni apres, sans balise markdown.
-Format : {"status": "CREATED ou UPDATED ou ERROR", "goodbarber_id": "identifiant de l'evenement", "message": "court resume de l'action ou de l'erreur"}"""
+Le champ "date_changed" n'a de sens QUE si status="UPDATED" : mets true si la date de debut du nouvel evenement est DIFFERENTE de la date de debut qui existait AVANT ta modification (= un nouvel evenement/occurrence a pris la place du container existant) ; mets false si la date de debut est restee IDENTIQUE (= simple rafraichissement d'un evenement toujours en cours/a venir, contenu ou image mis a jour). Mets false (valeur par defaut) si status="CREATED" ou "ERROR".
+Format : {"status": "CREATED ou UPDATED ou ERROR", "date_changed": true ou false, "goodbarber_id": "identifiant de l'evenement", "message": "court resume de l'action ou de l'erreur"}"""
 
 
 def _get_goodbarber_access_token() -> str:
@@ -132,6 +134,15 @@ def _build_user_message(record: dict) -> str:
     )
 
 
+def _describe_status(status: str, date_changed: bool) -> str:
+    """Traduit (status, date_changed) en libelle clair pour Events_Tracking."""
+    if status == "CREATED":
+        return "CREATED (nouvel evenement)"
+    if status == "UPDATED":
+        return "UPDATED - nouvel evenement (nouvelles dates)" if date_changed else "UPDATED - meme evenement (texte/image rafraichis)"
+    return status
+
+
 def process_one_record(record: dict, access_token: str) -> str:
     """Publie une ligne. Retourne le statut final."""
     record_id = record["id"]
@@ -177,6 +188,7 @@ def process_one_record(record: dict, access_token: str) -> str:
         return settings.STATUT_VALIDE
 
     status = decision.get("status", "ERROR")
+    date_changed = bool(decision.get("date_changed", False))
     message = decision.get("message", "")
     goodbarber_id = decision.get("goodbarber_id", "")
 
@@ -197,12 +209,12 @@ def process_one_record(record: dict, access_token: str) -> str:
             settings.FLD_GOODBARBER_ID: str(goodbarber_id) if goodbarber_id else "",
         },
     )
-    _report_to_client_and_tracking(record, status, message, goodbarber_id)
+    _report_to_client_and_tracking(record, status, message, goodbarber_id, date_changed)
     return settings.STATUT_RAPPORTE
 
 
 def _report_to_client_and_tracking(
-    record: dict, status: str, message: str, goodbarber_id: str
+    record: dict, status: str, message: str, goodbarber_id: str, date_changed: bool = False
 ) -> None:
     """
     Best-effort: resout le fichier client de la venue, y ecrit l'event,
@@ -235,7 +247,7 @@ def _report_to_client_and_tracking(
         airtable_client.create_record(
             settings.AIRTABLE_TABLE_TRACKING,
             {
-                settings.FLD_TRACK_STATUS: status,
+                settings.FLD_TRACK_STATUS: _describe_status(status, date_changed),
                 settings.FLD_TRACK_TITLE_AT_VENUE: f"{titre} at {venue_name}",
                 settings.FLD_TRACK_INSTAGRAM_URL: f"https://www.instagram.com/{instagram}/" if instagram else "",
                 settings.FLD_TRACK_VENUE: venue_name,
@@ -314,6 +326,7 @@ def process_grouped_records(records: list[dict], access_token: str) -> str:
         return settings.STATUT_VALIDE
 
     status = decision.get("status", "ERROR")
+    date_changed = bool(decision.get("date_changed", False))
     message = decision.get("message", "")
     goodbarber_id = decision.get("goodbarber_id", "")
 
@@ -326,7 +339,7 @@ def process_grouped_records(records: list[dict], access_token: str) -> str:
 
     if final_status == settings.STATUT_RAPPORTE:
         # Un seul log tracking + reporting client pour le groupe (evite les doublons de reporting)
-        _report_to_client_and_tracking(records[0], status, message, goodbarber_id)
+        _report_to_client_and_tracking(records[0], status, message, goodbarber_id, date_changed)
 
     logger.info(
         "Groupe traite: '%s' (%d lignes fusionnees) -> %s", venue_name, len(records), final_status
