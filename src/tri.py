@@ -28,6 +28,7 @@ Decide si cette ligne doit etre classee VALIDE (evenement actionnable, a publier
 - IGNORE si l'evenement est strictement deja passe (date anterieure a aujourd'hui) sans etre un jour recurrent.
 - IGNORE si l'evenement n'a manifestement pas lieu a Bali (autre ile indonesienne comme Sumba, ou etranger).
 - IGNORE si le texte est un post generique sans evenement precis (ex: horaires d'ouverture hebdomadaires sur les 7 jours, promo generale sans date).
+- IGNORE si le contenu ne decrit pas clairement UN evenement (ou une serie d'evenements identifiable, ex: calendrier hebdo/mensuel) avec venue + date + sujet identifiables - un contenu flou, une simple photo d'ambiance sans texte d'evenement, ou une promo generale sans aucun element concret doit etre Ignore.
 - IGNORE si le texte concerne une offre d'emploi ou un post non-evenementiel.
 
 ## CAS AMBIGUS - REGLE CRITIQUE

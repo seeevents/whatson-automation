@@ -62,9 +62,15 @@ def extract_from_images(image_urls: list[str], caption: str = "") -> dict[str, s
         "par erreur. Si l'image mentionne un jour de la semaine recurrent (ex: EVERY MONDAY), "
         "calcule la prochaine occurrence de ce jour a partir d'aujourd'hui. Si plusieurs "
         "jours (une image = un jour par exemple), utilise comme date le PREMIER jour, et "
-        "detaille TOUT le planning jour par jour dans alerte. Si aucune date lisible, mets "
-        "une chaine vide pour date. Reponds avec UN SEUL objet JSON (PAS un tableau, pas de "
-        "crochets [ ] autour), format exact : "
+        "detaille TOUT le planning jour par jour dans alerte. "
+        "CAS CALENDRIER MULTI-EVENEMENTS : si l'image est un calendrier montrant plusieurs "
+        "soirees/evenements differents sur UNE SEMAINE, prefixe le titre par 'This Week at "
+        "[nom de la venue]' (ex: 'This Week at Sunset Bar'), utilise comme date le premier "
+        "jour du calendrier a partir d'aujourd'hui, et liste le programme complet jour par "
+        "jour dans alerte. Si le calendrier couvre UN MOIS entier, prefixe plutot le titre "
+        "par 'This Month at [nom de la venue]', meme logique pour la date et le detail en "
+        "alerte. Si aucune date lisible, mets une chaine vide pour date. Reponds avec UN SEUL "
+        "objet JSON (PAS un tableau, pas de crochets [ ] autour), format exact : "
         '{"titre": "...", "date": "YYYY-MM-DD", "alerte": "..."}'
     )
     if caption:
