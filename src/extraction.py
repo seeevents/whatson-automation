@@ -142,8 +142,11 @@ def process_story(account: accounts.Account, story: dict) -> None:
         except (ValueError, TypeError):
             pass
 
-    video_candidates = [v.get("url") for v in (story.get("video_versions") or []) if v.get("url")]
-    media_url = video_candidates[0] if video_candidates else (image_candidates[0] if image_candidates else "")
+    # IMPORTANT: toujours utiliser l'image de couverture fixe (image_versions2), jamais l'URL
+    # video - GoodBarber rejette les .mp4 comme thumbnail (silencieusement, garde l'ancienne image).
+    # Instagram fournit toujours une image de couverture fixe avec le texte du flyer visible,
+    # meme pour les stories video - inutile d'extraire une frame de la video nous-memes.
+    media_url = image_candidates[0] if image_candidates else ""
 
     _write_event(
         venue_name=account.venue_name,
