@@ -33,7 +33,9 @@ def _download_image_b64(image_url: str) -> str | None:
         return None
 
 
-def extract_from_images(image_urls: list[str], caption: str = "") -> dict[str, str]:
+def extract_from_images(
+    image_urls: list[str], caption: str = "", published_timestamp: str = ""
+) -> dict[str, str]:
     """
     Envoie une ou plusieurs images (+ legende optionnelle) a Gemini Vision
     pour en extraire {titre, date, alerte}. Retourne un dict vide si echec
@@ -56,10 +58,22 @@ def extract_from_images(image_urls: list[str], caption: str = "") -> dict[str, s
         "Tu es un extracteur de donnees d'evenements ultra-precis specialise en lecture "
         "d'images (flyers/stories Instagram, souvent avec texte stylise). Analyse TOUTES "
         "les images fournies (meme carrousel) et la legende si presente. Extrait les infos "
-        "d'un evenement a Bali. Les evenements se produisent dans le present/futur proche "
-        "(annees courantes 2026 et au-dela) - c'est normal, ne traite jamais une date "
-        "recente comme suspecte, et n'ecris JAMAIS une annee anterieure a l'annee en cours "
-        "par erreur. Si l'image mentionne un jour de la semaine recurrent (ex: EVERY MONDAY), "
+        "d'un evenement a Bali. "
+        f"{('Ce post/story a ete publie le : ' + published_timestamp + '. ') if published_timestamp else ''}"
+        "REGLE CRITIQUE - DATE SANS ANNEE PRECISEE (le flyer donne mois+jour seulement, ex: "
+        "'Sept 19th-21st', sans annee) : n'utilise JAMAIS l'annee courante par defaut de "
+        "maniere automatique. Utilise TOUJOURS la date de publication ci-dessus comme "
+        "reference pour deduire l'annee correcte - l'evenement a presque toujours lieu PEU "
+        "DE TEMPS APRES la publication (quelques semaines a quelques mois), pas forcement "
+        "dans l'annee d'aujourd'hui. Si le post est ancien (publie il y a longtemps) et que "
+        "la date mois+jour tombe logiquement dans l'annee DE PUBLICATION, utilise cette "
+        "annee-la MEME SI cela rend l'evenement deja passe par rapport a aujourd'hui - "
+        "laisse alors la vraie date passee dans le champ date (le systeme en aval la "
+        "traitera comme perimee), NE LA DECALE JAMAIS artificiellement vers une annee "
+        "future juste pour la rendre 'a venir'. Si l'image donne une annee EXPLICITE, "
+        "utilise-la telle quelle (les evenements a Bali se produisent normalement dans le "
+        "present/futur proche, annees courantes 2026 et au-dela - ne traite jamais une "
+        "annee explicite recente comme suspecte). Si l'image mentionne un jour de la semaine recurrent (ex: EVERY MONDAY), "
         "calcule la prochaine occurrence de ce jour a partir d'aujourd'hui. Si plusieurs "
         "jours (une image = un jour par exemple), utilise comme date le PREMIER jour, et "
         "detaille TOUT le planning jour par jour dans alerte. "

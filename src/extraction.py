@@ -19,6 +19,7 @@ POST_EXTRACTION_SYSTEM_PROMPT = """Tu es un extracteur de donnees d'evenements u
 Format attendu (toujours ces 3 cles, jamais autre chose) :
 {"titre": "Nom de l'event ou du DJ", "date": "YYYY-MM-DD", "alerte": "Message d'alerte si tu as un doute ou si le post ne concerne pas un evenement, sinon vide"}
 IMPORTANT SUR LES DATES : les evenements a Bali se produisent dans le present ou le futur proche (annees courantes, y compris 2026 et au-dela) - c'est NORMAL et attendu, ne traite JAMAIS une date recente ou future comme invalide, suspecte ou anormale. Le champ "date" doit TOUJOURS etre soit un format YYYY-MM-DD strictement valide, soit une chaine vide "" si aucune date n'est determinable - ne mets JAMAIS un timestamp brut, un nombre, ou tout autre format dans ce champ, meme si tu as un doute sur la date : mets alors une chaine vide et explique ton doute dans le champ "alerte".
+REGLE CRITIQUE - DATE SANS ANNEE PRECISEE (mois+jour seulement, ex: "Sept 19th-21st", "March 5") : n'utilise JAMAIS l'annee courante par defaut de maniere automatique. Utilise TOUJOURS la date de publication du post comme reference pour deduire l'annee correcte : l'evenement a presque toujours lieu PEU DE TEMPS APRES la publication (memes quelques semaines a quelques mois), pas necessairement dans l'annee de aujourd'hui. Si le post a ete publie il y a longtemps (l'annee de publication est differente de l'annee actuelle) et que la date mois+jour mentionnee tombe logiquement dans l'annee DE PUBLICATION (peu apres la publication), utilise cette annee-la, meme si ca rend l'evenement deja passe par rapport a aujourd'hui - dans ce cas, laisse le champ date rempli avec la date reelle passee (le systeme en aval la traitera comme perimee), NE LA DECALE JAMAIS artificiellement vers une annee future juste pour la rendre "a venir".
 CAS CALENDRIER MULTI-EVENEMENTS : si le texte decrit plusieurs soirees/evenements differents sur UNE SEMAINE (ex: programme jour par jour), prefixe le titre par "This Week at [nom de la venue]", utilise comme date le premier jour concerne a partir d'aujourd'hui, et detaille le programme complet dans alerte. Si le texte couvre UN MOIS entier, prefixe plutot le titre par "This Month at [nom de la venue]", meme logique pour la date et le detail en alerte."""
 
 
@@ -91,7 +92,7 @@ def process_post(account: accounts.Account, post: dict) -> None:
 
     if not date and images:
         try:
-            vision_result = gemini_client.extract_from_images(images, caption)
+            vision_result = gemini_client.extract_from_images(images, caption, timestamp)
         except gemini_client.GeminiError as exc:
             logger.error("Echec fallback vision pour post %s: %s", post_url, exc)
             vision_result = {}
@@ -129,19 +130,22 @@ def process_story(account: accounts.Account, story: dict) -> None:
     if not image_candidates:
         return
 
+    taken_at = story.get("taken_at")
+    fallback_date = ""
+    published_timestamp = ""
+    if taken_at:
+        try:
+            dt = datetime.fromtimestamp(int(taken_at))
+            fallback_date = dt.strftime("%Y-%m-%d")
+            published_timestamp = dt.isoformat()
+        except (ValueError, TypeError):
+            pass
+
     try:
-        vision_result = gemini_client.extract_from_images(image_candidates[:1])
+        vision_result = gemini_client.extract_from_images(image_candidates[:1], published_timestamp=published_timestamp)
     except gemini_client.GeminiError as exc:
         logger.error("Echec vision pour story %s: %s", story_url, exc)
         return
-
-    taken_at = story.get("taken_at")
-    fallback_date = ""
-    if taken_at:
-        try:
-            fallback_date = datetime.fromtimestamp(int(taken_at)).strftime("%Y-%m-%d")
-        except (ValueError, TypeError):
-            pass
 
     # IMPORTANT: toujours utiliser l'image de couverture fixe (image_versions2), jamais l'URL
     # video - GoodBarber rejette les .mp4 comme thumbnail (silencieusement, garde l'ancienne image).
