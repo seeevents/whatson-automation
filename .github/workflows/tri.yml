@@ -3,8 +3,7 @@ name: WhatsOn - Tri Automatisé
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "40 4 * * *"  # 12:40 Bali (UTC+8), apres la fin normale des 8 batches
-    - cron: "55 4 * * *"  # 12:55 Bali, filet de securite si volume important
+    - cron: "10 4 * * *"  # 12:10 Bali (UTC+8), fenetre unique - apres la fin normale des 8 batches
 
 jobs:
   tri:
