@@ -3,7 +3,7 @@ name: WhatsOn - Publication GoodBarber
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "30 4 * * *"   # 12:30 Bali (un seul run/jour, apres la fenetre Tri)
+    - cron: "55 5 * * *"   # 13:55 Bali (un seul run/jour, marge de 55min apres le cron du Tri)
 
 jobs:
   publication:

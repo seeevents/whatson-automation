@@ -3,7 +3,7 @@ name: WhatsOn - Tri Automatisé
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "10 4 * * *"  # 12:10 Bali (UTC+8), fenetre unique - apres la fin normale des 8 batches
+    - cron: "0 5 * * *"  # 13:00 Bali (UTC+8), fenetre unique - marge de 90min apres le cron du batch pour absorber retard+duree observes
 
 jobs:
   tri:
