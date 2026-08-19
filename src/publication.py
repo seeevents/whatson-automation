@@ -370,12 +370,15 @@ def run(dry_run_record_ids: list[str] | None = None) -> dict[str, int]:
     access_token = _get_goodbarber_access_token()
 
     if dry_run_record_ids:
-        records = [
-            airtable_client.search_records(
+        records = []
+        for rid in dry_run_record_ids:
+            found = airtable_client.search_records(
                 settings.AIRTABLE_TABLE_EVENTS, formula=f"RECORD_ID()='{rid}'", max_records=1
-            )[0]
-            for rid in dry_run_record_ids
-        ]
+            )
+            if found:
+                records.append(found[0])
+            else:
+                logger.warning("ID '%s' introuvable (deja traite ou supprime) - ignore", rid)
     else:
         records = airtable_client.search_records(
             settings.AIRTABLE_TABLE_EVENTS,
