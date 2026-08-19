@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timedelta
 
 from config import settings
-from src import airtable_client, claude_client, msgraph_client
+from src import airtable_client, claude_client, geocoding, msgraph_client
 
 logger = logging.getLogger("whatson.publication")
 
@@ -48,6 +48,7 @@ Etape 2 (Mise a jour si l'evenement existe) :
 
 Etape 3 (Creation si l'evenement n'existe pas) :
 - Execute cms_create_event avec la categorie de date fournie, le titre, SEO, et l'Image URL.
+- GPS (IMPORTANT, evite le bug connu des nouveaux events avec coordonnees 0,0) : si le message utilisateur fournit une adresse et des coordonnees GPS geocodees, transmets-les OBLIGATOIREMENT dans les champs address/latitude/longitude de cms_create_event. Si aucune adresse n'a ete geocodee (message l'indique explicitement), laisse ces champs vides plutot que d'inventer une adresse ou des coordonnees toi-meme.
 
 Etape 4 (Contenu du texte) :
 - CAS NORMAL (une seule source) : le contenu de ce paragraphe DOIT etre la legende/texte d'origine fournie, copiee MOT POUR MOT (voir regle TEXTE ORIGINAL ci-dessous) - ne redige JAMAIS un texte toi-meme sauf si ce champ est vide ou totalement inexploitable.
@@ -122,12 +123,23 @@ def _build_user_message(record: dict) -> str:
     f = record["fields"]
     date_event = f.get(settings.FLD_DATE, "")
     categorie = _compute_date_category(date_event)
+    venue_name = f.get(settings.FLD_VENUE_NAME, "")
+    geo = geocoding.geocode_venue(venue_name)
+    geo_line = (
+        f"Adresse et coordonnees GPS geocodees pour cette venue (a utiliser UNIQUEMENT si tu crees "
+        f"un nouvel evenement - cms_create_event - jamais si tu mets a jour un evenement existant, "
+        f"voir regle GPS dans le prompt systeme) : adresse=\"{geo['address']}\", "
+        f"latitude={geo['latitude']}, longitude={geo['longitude']}\n"
+        if geo
+        else "Adresse et coordonnees GPS : non trouvees automatiquement, laisse ces champs vides si tu crees un nouvel evenement.\n"
+    )
     return (
         f"Titre : {f.get(settings.FLD_TITRE, '')}\n"
         f"Date de l'evenement : {date_event}\n"
         f"Categorie de date calculee (a utiliser telle quelle, ne la recalcule pas toi-meme) : {categorie}\n"
-        f"Nom de la venue : {f.get(settings.FLD_VENUE_NAME, '')}\n"
+        f"Nom de la venue : {venue_name}\n"
         f"Compte Instagram (repli si le nom de venue ne donne aucun resultat) : {f.get(settings.FLD_INSTAGRAM, '')}\n"
+        f"{geo_line}"
         f"Texte / legende d'origine : {f.get(settings.FLD_LEGENDE, '')}\n"
         f"Image URL : {f.get(settings.FLD_IMAGE_URL, '')}\n"
         f"Note IA / alerte eventuelle : {f.get(settings.FLD_ALERTE, '')}"
@@ -270,12 +282,22 @@ def _build_grouped_user_message(records: list[dict]) -> str:
     first = records[0]["fields"]
     date_event = first.get(settings.FLD_DATE, "")
     categorie = _compute_date_category(date_event)
+    venue_name = first.get(settings.FLD_VENUE_NAME, "")
+    geo = geocoding.geocode_venue(venue_name)
+    geo_line = (
+        f"Adresse et coordonnees GPS geocodees pour cette venue (a utiliser UNIQUEMENT si tu crees "
+        f"un nouvel evenement - cms_create_event - jamais si tu mets a jour un evenement existant) : "
+        f"adresse=\"{geo['address']}\", latitude={geo['latitude']}, longitude={geo['longitude']}\n"
+        if geo
+        else "Adresse et coordonnees GPS : non trouvees automatiquement, laisse ces champs vides si tu crees un nouvel evenement.\n"
+    )
 
     header = (
         f"Date de l'evenement : {date_event}\n"
         f"Categorie de date calculee (a utiliser telle quelle, ne la recalcule pas toi-meme) : {categorie}\n"
-        f"Nom de la venue : {first.get(settings.FLD_VENUE_NAME, '')}\n"
-        f"Compte Instagram (repli si le nom de venue ne donne aucun resultat) : {first.get(settings.FLD_INSTAGRAM, '')}\n\n"
+        f"Nom de la venue : {venue_name}\n"
+        f"Compte Instagram (repli si le nom de venue ne donne aucun resultat) : {first.get(settings.FLD_INSTAGRAM, '')}\n"
+        f"{geo_line}\n"
         f"ATTENTION : {len(records)} posts distincts detectes pour cette meme venue/date - "
         f"synthetise-les en UN SEUL evenement (voir section CAS MULTI-SOURCES du prompt systeme).\n"
     )

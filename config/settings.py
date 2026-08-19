@@ -86,6 +86,9 @@ MS_INSTACHECK_ITEM_ID = "01WDGNM5FVNBVIOWJBVBHI6SAT5TFHDL4D"
 
 # --- Gemini Vision (fallback OCR stories/posts sans date) ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
+# --- Google Maps Geocoding (adresse/GPS des nouveaux events) ---
+GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")
 GEMINI_MODEL = "gemini-3.6-flash"
 
 # --- Dedup tracking (table Airtable separee, evite de retraiter le meme post/story) ---
