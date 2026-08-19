@@ -135,11 +135,12 @@ def _build_user_message(record: dict) -> str:
 
 
 def _describe_status(status: str, date_changed: bool) -> str:
-    """Traduit (status, date_changed) en libelle clair pour Events_Tracking."""
+    """Traduit (status, date_changed) en libelle clair pour Events_Tracking (en anglais,
+    coherent avec le reste des fichiers partages avec l'equipe)."""
     if status == "CREATED":
-        return "CREATED (nouvel evenement)"
+        return "CREATED (new event)"
     if status == "UPDATED":
-        return "UPDATED - nouvel evenement (nouvelles dates)" if date_changed else "UPDATED - meme evenement (texte/image rafraichis)"
+        return "UPDATED - new event (new dates)" if date_changed else "UPDATED - same event (refreshed)"
     return status
 
 
