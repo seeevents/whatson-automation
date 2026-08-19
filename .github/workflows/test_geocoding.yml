@@ -1,0 +1,28 @@
+name: WhatsOn - Test Geocoding (lecture seule)
+
+on:
+  workflow_dispatch:
+    inputs:
+      venue_name:
+        description: "Nom de la venue a geocoder (ex: Klymax Discotheque)"
+        required: true
+        type: string
+
+jobs:
+  test-geocoding:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dependances
+        run: pip install -r requirements.txt
+
+      - name: Tester le geocodage
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+        run: python scripts/test_geocoding.py "${{ inputs.venue_name }}"
