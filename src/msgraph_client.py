@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import threading
 import time
 from typing import Any
 
@@ -22,6 +23,7 @@ MAX_RETRIES = 3
 
 _cached_token: str | None = None
 _cached_token_expiry: float = 0.0
+_token_lock = threading.Lock()  # evite les fetchs redondants/concurrents en mode parallele
 
 
 class MSGraphError(Exception):
@@ -29,33 +31,36 @@ class MSGraphError(Exception):
 
 
 def _get_access_token() -> str:
-    """Recupere (et met en cache) un token d'acces via client credentials flow."""
+    """Recupere (et met en cache) un token d'acces via client credentials flow.
+    Thread-safe : un seul thread rafraichit le token a la fois, les autres
+    attendent puis reutilisent le resultat mis en cache."""
     global _cached_token, _cached_token_expiry
 
-    if _cached_token and time.time() < _cached_token_expiry - 60:
+    with _token_lock:
+        if _cached_token and time.time() < _cached_token_expiry - 60:
+            return _cached_token
+
+        if not (settings.MS_CLIENT_ID and settings.MS_CLIENT_SECRET and settings.MS_TENANT_ID):
+            raise MSGraphError(
+                "MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET / MICROSOFT_TENANT_ID manquants."
+            )
+
+        url = TOKEN_URL_TEMPLATE.format(tenant=settings.MS_TENANT_ID)
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": settings.MS_CLIENT_ID,
+            "client_secret": settings.MS_CLIENT_SECRET,
+            "scope": "https://graph.microsoft.com/.default",
+        }
+        resp = requests.post(url, data=data, timeout=30)
+        if not resp.ok:
+            raise MSGraphError(f"Echec authentification Graph: {resp.status_code} {resp.text[:500]}")
+
+        payload = resp.json()
+        _cached_token = payload["access_token"]
+        _cached_token_expiry = time.time() + payload.get("expires_in", 3600)
+        logger.info("Token Microsoft Graph obtenu (valide %ss)", payload.get("expires_in"))
         return _cached_token
-
-    if not (settings.MS_CLIENT_ID and settings.MS_CLIENT_SECRET and settings.MS_TENANT_ID):
-        raise MSGraphError(
-            "MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET / MICROSOFT_TENANT_ID manquants."
-        )
-
-    url = TOKEN_URL_TEMPLATE.format(tenant=settings.MS_TENANT_ID)
-    data = {
-        "grant_type": "client_credentials",
-        "client_id": settings.MS_CLIENT_ID,
-        "client_secret": settings.MS_CLIENT_SECRET,
-        "scope": "https://graph.microsoft.com/.default",
-    }
-    resp = requests.post(url, data=data, timeout=30)
-    if not resp.ok:
-        raise MSGraphError(f"Echec authentification Graph: {resp.status_code} {resp.text[:500]}")
-
-    payload = resp.json()
-    _cached_token = payload["access_token"]
-    _cached_token_expiry = time.time() + payload.get("expires_in", 3600)
-    logger.info("Token Microsoft Graph obtenu (valide %ss)", payload.get("expires_in"))
-    return _cached_token
 
 
 def _headers() -> dict[str, str]:

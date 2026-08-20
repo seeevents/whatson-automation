@@ -9,6 +9,8 @@ Publie chaque ligne "Validé" sur GoodBarber via l'agent Claude + MCP
 from __future__ import annotations
 
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
 from config import settings
@@ -376,13 +378,25 @@ def _group_key(record: dict) -> tuple[str, str]:
     return (venue, date)
 
 
-def run(dry_run_record_ids: list[str] | None = None) -> dict[str, int]:
+def _process_unit(group: list[dict], access_token: str) -> str:
+    """Traite une unite (1 ligne seule ou un groupe multi-sources)."""
+    if len(group) == 1:
+        return process_one_record(group[0], access_token)
+    return process_grouped_records(group, access_token)
+
+
+def run(dry_run_record_ids: list[str] | None = None, max_workers: int = 6) -> dict[str, int]:
     """
     Publie toutes les lignes 'Validé' actuelles.
     Les lignes partageant la meme venue + meme date sont regroupees et
     publiees comme UN SEUL evenement de synthese (evite d'ecraser
     plusieurs fois le meme container GoodBarber avec des contenus
     differents - cas des festivals multi-posts).
+    Le traitement des unites (lignes seules ou groupes) se fait en
+    PARALLELE (max_workers threads simultanes) - chaque appel Claude/MCP
+    est independant, et rester dans un seul processus Python (plutot que
+    plusieurs jobs GitHub Actions separes comme pour Brique 3) garantit
+    que le regroupement par venue+date reste correct.
     Si `dry_run_record_ids` est fourni, ne traite QUE ces IDs précis
     (utilisé pour tester sur des enregistrements isolés, sans toucher
     à la vraie file de production).
@@ -422,15 +436,31 @@ def run(dry_run_record_ids: list[str] | None = None) -> dict[str, int]:
         )
 
     summary: dict[str, int] = {}
+    summary_lock = threading.Lock()
     total_units = len(groups)
-    for i, group in enumerate(groups.values(), start=1):
-        if len(group) == 1:
-            result = process_one_record(group[0], access_token)
-        else:
-            result = process_grouped_records(group, access_token)
-        summary[result] = summary.get(result, 0) + 1
-        if i % 10 == 0 or i == total_units:
-            logger.info("Progression: %d/%d unite(s) traitees (%s)", i, total_units, summary)
+    completed = 0
+    completed_lock = threading.Lock()
+
+    logger.info("Traitement en parallele: %d unite(s), %d thread(s) simultanes max", total_units, max_workers)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_process_unit, group, access_token): group for group in groups.values()}
+        for future in as_completed(futures):
+            group = futures[future]
+            venue_name = group[0]["fields"].get(settings.FLD_VENUE_NAME, "?")
+            try:
+                result = future.result()
+            except Exception:
+                logger.exception("Echec non-capture pour le groupe '%s' - unite ignoree", venue_name)
+                result = "ERREUR_NON_CAPTUREE"
+
+            with summary_lock:
+                summary[result] = summary.get(result, 0) + 1
+            with completed_lock:
+                completed += 1
+                current = completed
+            if current % 10 == 0 or current == total_units:
+                logger.info("Progression: %d/%d unite(s) traitees (%s)", current, total_units, summary)
 
     logger.info("Publication terminee: %s", summary)
     return summary
