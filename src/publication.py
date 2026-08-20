@@ -385,7 +385,7 @@ def _process_unit(group: list[dict], access_token: str) -> str:
     return process_grouped_records(group, access_token)
 
 
-def run(dry_run_record_ids: list[str] | None = None, max_workers: int = 6) -> dict[str, int]:
+def run(dry_run_record_ids: list[str] | None = None, max_workers: int = 10) -> dict[str, int]:
     """
     Publie toutes les lignes 'Validé' actuelles.
     Les lignes partageant la meme venue + meme date sont regroupees et
