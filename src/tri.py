@@ -4,16 +4,31 @@ Module de Tri automatisé - portage direct du scénario Make
 
 Classe chaque ligne "A valider" en Validé/Ignoré, avec correction de date
 si nécessaire, en 100% autonome (jamais de pause pour confirmation humaine).
+
+ARCHITECTURE HYBRIDE (objectif explicite : minimiser les credits Anthropic
+au strict necessaire, dans une logique de sobriete) : chaque ligne passe
+d'abord par des regles Python pures (date_extractor, promo_classifier,
+verification geographique, detection calendrier multi-jours). Si TOUS ces
+controles sont a haute confiance, la decision est prise SANS appel Claude.
+Si UN SEUL controle est incertain, on bascule sur l'appel Claude complet
+(comportement identique a avant) pour ne jamais sacrifier la fiabilite.
 """
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 
 from config import settings
-from src import airtable_client, claude_client
+from src import airtable_client, claude_client, date_extractor, promo_classifier
 
 logger = logging.getLogger("whatson.tri")
+
+# Lieux hors Bali frequemment mentionnes par erreur dans des posts de comptes bases a Bali
+NON_BALI_PLACES = [
+    r"\bsumba\b", r"\blombok\b", r"\bjava\b(?!\s+coffee)", r"\bflores\b",
+    r"\bjakarta\b.*\bevent\b", r"\bitaly\b", r"\beurope\b", r"\bsingapore\b.*\bevent\b",
+]
 
 SYSTEM_PROMPT = """Tu es un agent de tri strict pour les evenements SEE Bali / WhatsOn. Tu traites une seule ligne (un post ou story Instagram deja extrait par un premier passage IA), sans memoire d'aucune autre ligne traitee avant ou apres.
 
@@ -42,6 +57,34 @@ N'ecris JAMAIS de raisonnement, de brouillon ou de texte explicatif visible avan
 Format exact : {"status": "Valide" ou "Ignore", "corrected_date": "YYYY-MM-DD si Valide, chaine vide si Ignore", "alert_note": "note courte si signal faible, sinon chaine vide"}"""
 
 
+def _check_geography(text: str) -> tuple[bool, str]:
+    """
+    Retourne (confiance_haute, is_bali).
+    IMPORTANT : une simple detection de mot-cle "Sumba"/"Italy" etc. ne
+    suffit PAS a rejeter un event avec confiance - une venue basee a Bali
+    peut mentionner un autre lieu en passant sans que l'evenement s'y
+    deroule (risque de faux positif trop eleve pour trancher seul en
+    Python). On ne renvoie donc JAMAIS is_bali=False avec haute confiance
+    ici - une mention suspecte declenche systematiquement le fallback
+    Claude, qui a le contexte necessaire pour juger correctement.
+    """
+    t = text.lower()
+    for pattern in NON_BALI_PLACES:
+        if re.search(pattern, t):
+            return False, True  # confiance BASSE : laisse Claude trancher, ne rejette jamais seul
+    return True, True  # haute confiance : rien de suspect detecte
+
+
+def _count_distinct_weekdays_mentioned(text: str) -> int:
+    """Compte le nombre de jours de semaine DIFFERENTS mentionnes - un
+    nombre eleve (3+) suggere un calendrier multi-jours (This Week/This
+    Month at...), cas nuance qu'on prefere laisser a Claude plutot que
+    de deviner en Python."""
+    t = text.lower()
+    found = {day for day in date_extractor.ALL_WEEKDAYS if re.search(rf"\b{day}\b", t)}
+    return len(found)
+
+
 def _build_user_message(record: dict) -> str:
     f = record["fields"]
     today = datetime.now(settings.BALI_TZ).strftime("%Y-%m-%d (%A)")
@@ -56,12 +99,70 @@ def _build_user_message(record: dict) -> str:
     )
 
 
-def process_one_record(record: dict) -> str:
+def _try_python_classification(record: dict) -> tuple[bool, str, str]:
     """
-    Traite une ligne. Retourne le statut final ('Validé', 'Ignoré', ou
-    'A valider' en cas d'échec technique - la ligne reste en attente pour
-    le prochain run plutôt que d'être perdue silencieusement).
+    Tente une classification 100% Python (zero appel Claude).
+    Retourne (succes, status, date) - succes=False signifie qu'il faut
+    basculer sur l'appel Claude complet (cas incertain).
     """
+    f = record["fields"]
+    caption = f.get(settings.FLD_LEGENDE, "") or ""
+    alerte_existing = f.get(settings.FLD_ALERTE, "") or ""
+    combined_text = f"{caption} {alerte_existing}"
+    today = datetime.now(settings.BALI_TZ).date()
+
+    # Controle 1: calendrier multi-jours ? (3+ jours de semaine differents mentionnes)
+    if _count_distinct_weekdays_mentioned(combined_text) >= 3:
+        return False, "", ""  # trop nuance pour du Python simple, fallback Claude
+
+    # Controle 2: geographie
+    geo_confident, is_bali = _check_geography(combined_text)
+    if not geo_confident:
+        return False, "", ""
+    if not is_bali:
+        return True, settings.STATUT_IGNORE, ""
+
+    # Controle 3: promo generique
+    promo_result = promo_classifier.classify_promo(combined_text)
+    if promo_result.confidence != "high":
+        return False, "", ""
+    if promo_result.is_generic_promo:
+        return True, settings.STATUT_IGNORE, ""
+
+    # Controle 4: date/jour exploitable
+    date_result = date_extractor.extract_date(combined_text, today)
+    if date_result.confidence != "high":
+        return False, "", ""
+    if not date_result.date:
+        return True, settings.STATUT_IGNORE, ""
+
+    # Tous les controles sont a haute confiance et coherents : VALIDE
+    return True, settings.STATUT_VALIDE, date_result.date
+
+
+def process_one_record(record: dict) -> tuple[str, bool]:
+    """
+    Traite une ligne. Retourne (statut_final, utilise_python_seul).
+    statut_final = 'Validé', 'Ignoré', ou 'A valider' en cas d'échec
+    technique (la ligne reste en attente pour le prochain run plutôt que
+    d'être perdue silencieusement).
+    """
+    record_id = record["id"]
+
+    success, status, corrected_date = _try_python_classification(record)
+    if success:
+        fields = {settings.FLD_STATUT: status, settings.FLD_ALERTE: ""}
+        if status == settings.STATUT_VALIDE and corrected_date:
+            fields[settings.FLD_DATE] = corrected_date
+        airtable_client.update_record(settings.AIRTABLE_TABLE_EVENTS, record_id, fields)
+        return status, True
+
+    return _process_via_claude(record), False
+
+
+def _process_via_claude(record: dict) -> str:
+    """Fallback Claude complet - utilise UNIQUEMENT quand la classification
+    Python pure n'a pas assez de confiance pour trancher seule."""
     record_id = record["id"]
     user_message = _build_user_message(record)
 
@@ -115,22 +216,45 @@ def process_one_record(record: dict) -> str:
         return settings.STATUT_IGNORE
 
 
-def run() -> dict[str, int]:
-    """Traite toutes les lignes 'A valider' actuelles. Retourne un résumé."""
-    records = airtable_client.search_records(
-        settings.AIRTABLE_TABLE_EVENTS,
-        formula=f"{{Statut}} = '{settings.STATUT_A_VALIDER}'",
-        max_records=settings.MAX_RECORDS_PER_RUN,
-    )
+def run(dry_run_record_ids: list[str] | None = None) -> dict[str, int]:
+    """
+    Traite toutes les lignes 'A valider' actuelles. Retourne un résumé.
+    Si `dry_run_record_ids` est fourni, ne traite QUE ces IDs précis
+    (utilisé pour tester sur des enregistrements isolés, sans toucher
+    à la vraie file de production).
+    """
+    if dry_run_record_ids:
+        records = []
+        for rid in dry_run_record_ids:
+            found = airtable_client.search_records(
+                settings.AIRTABLE_TABLE_EVENTS, formula=f"RECORD_ID()='{rid}'", max_records=1
+            )
+            if found:
+                records.append(found[0])
+            else:
+                logger.warning("ID '%s' introuvable (deja traite ou supprime) - ignore", rid)
+    else:
+        records = airtable_client.search_records(
+            settings.AIRTABLE_TABLE_EVENTS,
+            formula=f"{{Statut}} = '{settings.STATUT_A_VALIDER}'",
+            max_records=settings.MAX_RECORDS_PER_RUN,
+        )
     logger.info("Tri: %d ligne(s) a traiter", len(records))
 
     summary = {"Validé": 0, "Ignoré": 0, "A valider": 0}
+    python_only_count = 0
     total = len(records)
     for i, record in enumerate(records, start=1):
-        result = process_one_record(record)
+        result, used_python_only = process_one_record(record)
+        if used_python_only:
+            python_only_count += 1
         summary[result] = summary.get(result, 0) + 1
         if i % 10 == 0 or i == total:
-            logger.info("Progression: %d/%d traitees (%s)", i, total, summary)
+            logger.info(
+                "Progression: %d/%d traitees (%s) - %d/%d sans appel Claude (%.0f%%)",
+                i, total, summary, python_only_count, i, 100 * python_only_count / i,
+            )
 
-    logger.info("Tri termine: %s", summary)
+    logger.info("Tri termine: %s - %d/%d lignes traitees en Python pur (%.0f%%)",
+                summary, python_only_count, total, 100 * python_only_count / total if total else 0)
     return summary

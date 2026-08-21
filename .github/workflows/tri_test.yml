@@ -1,0 +1,30 @@
+name: WhatsOn - Test Tri (isolé)
+
+on:
+  workflow_dispatch:
+    inputs:
+      record_id:
+        description: "ID(s) Airtable a tester - un seul, ou plusieurs separes par des espaces"
+        required: true
+        type: string
+
+jobs:
+  tri-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dependances
+        run: pip install -r requirements.txt
+
+      - name: Lancer le Tri en mode test
+        env:
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+        run: python scripts/run_tri_test.py ${{ inputs.record_id }}
