@@ -11,7 +11,7 @@ import logging
 from datetime import datetime
 
 from config import settings
-from src import accounts, airtable_client, apify_client, claude_client, dedup, gemini_client
+from src import accounts, airtable_client, apify_client, claude_client, date_extractor, dedup, gemini_client
 
 logger = logging.getLogger("whatson.extraction")
 
@@ -21,6 +21,22 @@ Format attendu (toujours ces 3 cles, jamais autre chose) :
 IMPORTANT SUR LES DATES : les evenements a Bali se produisent dans le present ou le futur proche (annees courantes, y compris 2026 et au-dela) - c'est NORMAL et attendu, ne traite JAMAIS une date recente ou future comme invalide, suspecte ou anormale. Le champ "date" doit TOUJOURS etre soit un format YYYY-MM-DD strictement valide, soit une chaine vide "" si aucune date n'est determinable - ne mets JAMAIS un timestamp brut, un nombre, ou tout autre format dans ce champ, meme si tu as un doute sur la date : mets alors une chaine vide et explique ton doute dans le champ "alerte".
 REGLE CRITIQUE - DATE SANS ANNEE PRECISEE (mois+jour seulement, ex: "Sept 19th-21st", "March 5") : n'utilise JAMAIS l'annee courante par defaut de maniere automatique. Utilise TOUJOURS la date de publication du post comme reference pour deduire l'annee correcte : l'evenement a presque toujours lieu PEU DE TEMPS APRES la publication (memes quelques semaines a quelques mois), pas necessairement dans l'annee de aujourd'hui. Si le post a ete publie il y a longtemps (l'annee de publication est differente de l'annee actuelle) et que la date mois+jour mentionnee tombe logiquement dans l'annee DE PUBLICATION (peu apres la publication), utilise cette annee-la, meme si ca rend l'evenement deja passe par rapport a aujourd'hui - dans ce cas, laisse le champ date rempli avec la date reelle passee (le systeme en aval la traitera comme perimee), NE LA DECALE JAMAIS artificiellement vers une annee future juste pour la rendre "a venir".
 CAS CALENDRIER MULTI-EVENEMENTS : si le texte decrit plusieurs soirees/evenements differents sur UNE SEMAINE (ex: programme jour par jour), prefixe le titre par "This Week at [nom de la venue]", utilise comme date le premier jour concerne a partir d'aujourd'hui, et detaille le programme complet dans alerte. Si le texte couvre UN MOIS entier, prefixe plutot le titre par "This Month at [nom de la venue]", meme logique pour la date et le detail en alerte."""
+
+# Prompt MINIMAL (economie de credits) - utilise UNIQUEMENT quand la date a
+# deja ete determinee avec confiance par les regles Python (date_extractor),
+# donc pas besoin de la logique complexe de raisonnement sur les dates/annees
+# ci-dessus - juste le titre, en un appel bien plus court/rapide.
+TITLE_ONLY_SYSTEM_PROMPT = """Tu es un extracteur de titre d'evenement. Analyse ce texte Instagram et extrait UNIQUEMENT le nom/titre de l'evenement, du DJ, ou de l'artiste mis en avant (ex: "Sunset Session with DJ Marco", "Live Jazz Night", "Quiz Night"). Reponds avec UNIQUEMENT un objet JSON, rien d'autre, format exact : {"titre": "..."}"""
+
+
+def _extract_title_only(caption: str) -> str:
+    """Appel Claude MINIMAL (economie de credits) - uniquement le titre,
+    utilise quand la date est deja sure via les regles Python."""
+    response = claude_client.call_claude(
+        TITLE_ONLY_SYSTEM_PROMPT, f"Texte Instagram : {caption}", max_tokens=256
+    )
+    result = claude_client.extract_json_from_response(response)
+    return result.get("titre", "")
 
 
 def _extract_from_caption(caption: str, published_timestamp: str) -> dict[str, str]:
@@ -63,7 +79,14 @@ def _write_event(
 
 
 def process_post(account: accounts.Account, post: dict) -> None:
-    """Traite un post: dedup -> extraction texte -> fallback vision si besoin -> ecriture."""
+    """Traite un post: dedup -> extraction texte (hybride Python+Claude) -> fallback vision si besoin -> ecriture.
+    Architecture hybride (economie de credits Anthropic) :
+    - Date d'abord tentee en Python pur (date_extractor), ancree sur la date de publication du post.
+    - Si confiance haute ET une date trouvee : appel Claude MINIMAL juste pour le titre.
+    - Si confiance haute mais AUCUNE date trouvee : aucun appel Claude du tout (sera tres
+      probablement Ignore par le Tri de toute facon, pas la peine de depenser un appel titre).
+    - Si confiance basse (cas ambigu) : fallback sur l'extraction complete (comportement inchange).
+    """
     post_url = post.get("url", "")
     if not post_url or dedup.already_processed(post_url):
         return
@@ -71,23 +94,44 @@ def process_post(account: accounts.Account, post: dict) -> None:
     caption = post.get("caption", "") or ""
     timestamp = post.get("timestamp", "")
     fallback_date = ""
+    reference_date = None
     if timestamp:
         try:
-            fallback_date = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).strftime(
-                "%Y-%m-%d"
-            )
+            dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            fallback_date = dt.strftime("%Y-%m-%d")
+            reference_date = dt.date()
         except ValueError:
             pass
+    if reference_date is None:
+        reference_date = datetime.now(settings.BALI_TZ).date()
 
-    try:
-        result = _extract_from_caption(caption, timestamp)
-    except claude_client.ClaudeError as exc:
-        logger.error("Echec extraction Claude pour post %s: %s", post_url, exc)
-        return
+    date_result = date_extractor.extract_date(caption, reference_date)
 
-    titre = result.get("titre", "")
-    date = result.get("date", "")
-    alerte = result.get("alerte", "")
+    if date_result.confidence == "high" and date_result.date:
+        # Date sure en Python : appel Claude MINIMAL, uniquement pour le titre
+        try:
+            titre = _extract_title_only(caption)
+        except claude_client.ClaudeError as exc:
+            logger.warning("Echec extraction titre minimal pour post %s: %s", post_url, exc)
+            titre = ""
+        date = date_result.date
+        alerte = f"[PYTHON] {date_result.reason}"
+    elif date_result.confidence == "high" and not date_result.date:
+        # Confiant qu'il n'y a AUCUN signal temporel - zero appel Claude
+        titre = ""
+        date = ""
+        alerte = "[PYTHON] aucun signal temporel detecte, probablement pas un evenement"
+    else:
+        # Cas ambigu : fallback sur l'extraction complete (comportement inchange, preserve la qualite)
+        try:
+            result = _extract_from_caption(caption, timestamp)
+        except claude_client.ClaudeError as exc:
+            logger.error("Echec extraction Claude pour post %s: %s", post_url, exc)
+            return
+        titre = result.get("titre", "")
+        date = result.get("date", "")
+        alerte = result.get("alerte", "")
+
     images = post.get("images", []) or []
 
     if not date and images:
@@ -112,7 +156,10 @@ def process_post(account: accounts.Account, post: dict) -> None:
         fallback_date_source=fallback_date,
     )
     dedup.mark_processed(post_url)
-    logger.info("Post traite: %s (%s)", post_url, "avec date" if date else "sans date")
+    method = "Python+titre-minimal" if date_result.confidence == "high" and date_result.date else (
+        "Python-seul (sans date)" if date_result.confidence == "high" else "Claude complet (fallback)"
+    )
+    logger.info("Post traite: %s (%s, methode=%s)", post_url, "avec date" if date else "sans date", method)
 
 
 def process_story(account: accounts.Account, story: dict) -> None:
