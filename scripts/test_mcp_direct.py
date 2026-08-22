@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 Test isole: connexion DIRECTE au serveur MCP GoodBarber (sans passer par
-Claude), liste les outils disponibles. Lecture seule, aucune ecriture.
+Claude) via le vrai flux OAuth. Necessite que le bootstrap initial
+(scripts/oauth_bootstrap_goodbarber.py) ait deja ete fait au moins une
+fois (etat persiste dans Airtable ou fourni via GOODBARBER_MCP_OAUTH_STATE).
+Lecture seule, aucune ecriture sur GoodBarber.
 """
 import logging
 import sys
@@ -10,23 +13,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config.settings import validate_config
-from src import airtable_client, goodbarber_mcp_client
-from config import settings
+from src import goodbarber_mcp_client
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("whatson.test_mcp_direct")
-
-
-def _get_goodbarber_access_token() -> str:
-    import json as _json
-
-    records = airtable_client.search_records(
-        settings.AIRTABLE_TABLE_TOKENS, formula="{Token Label} = 'current'", max_records=1
-    )
-    if not records:
-        raise RuntimeError("Aucun token GoodBarber trouve dans Airtable.")
-    token_json = records[0]["fields"].get("fldjX3lvP5GYdDHnU", "{}")
-    return _json.loads(token_json).get("access_token", "")
 
 
 def main() -> int:
@@ -35,15 +25,9 @@ def main() -> int:
         logger.error("Variables d'environnement manquantes: %s", ", ".join(missing))
         return 1
 
-    logger.info("Recuperation du token GoodBarber depuis Airtable...")
-    access_token = _get_goodbarber_access_token()
-    if not access_token:
-        logger.error("Token GoodBarber vide.")
-        return 1
-
-    logger.info("Connexion directe au serveur MCP GoodBarber...")
+    logger.info("Connexion directe au serveur MCP GoodBarber (OAuth)...")
     try:
-        tools = goodbarber_mcp_client.list_tools(access_token)
+        tools = goodbarber_mcp_client.list_tools()
     except goodbarber_mcp_client.GoodBarberMCPError as exc:
         logger.error("Echec: %s", exc)
         return 1
