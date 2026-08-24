@@ -195,3 +195,43 @@ def list_tools() -> list[dict]:
         raise
     except Exception as exc:
         raise GoodBarberMCPError(f"Echec connexion/decouverte MCP: {type(exc).__name__}: {exc}") from exc
+
+
+async def _run_in_session_async(async_fn, step_timeout: float):
+    oauth = _build_oauth_provider()
+    async with httpx2.AsyncClient(auth=oauth, follow_redirects=True) as http_client:
+        transport = streamable_http_client(settings.GOODBARBER_MCP_URL, http_client=http_client)
+        async with Client(transport) as client:
+            return await asyncio.wait_for(async_fn(client), timeout=step_timeout)
+
+
+def run_in_session(async_fn, step_timeout: float = 120.0):
+    """
+    Execute async_fn(client) dans UNE SEULE session MCP connectee (evite de
+    rouvrir la connexion - couteuse, ~10-15s - a chaque appel d'outil).
+    async_fn recoit le client MCP connecte et peut faire autant d'appels
+    sequentiels/conditionnels que necessaire avant de retourner son resultat.
+    """
+    try:
+        return asyncio.run(_run_in_session_async(async_fn, step_timeout))
+    except GoodBarberMCPError:
+        raise
+    except Exception as exc:
+        raise GoodBarberMCPError(f"Echec session MCP: {type(exc).__name__}: {exc}") from exc
+
+
+def parse_tool_result(result) -> dict:
+    """Extrait le contenu JSON d'un resultat d'appel d'outil MCP."""
+    if result.is_error:
+        error_text = ""
+        for block in result.content:
+            if hasattr(block, "text"):
+                error_text += block.text
+        raise GoodBarberMCPError(f"Erreur outil MCP: {error_text[:500]}")
+    for block in result.content:
+        if hasattr(block, "text"):
+            try:
+                return json.loads(block.text)
+            except json.JSONDecodeError:
+                return {"raw_text": block.text}
+    return {}

@@ -1,0 +1,26 @@
+name: WhatsOn - Test MCP schemas outils (lecture seule)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  test-schemas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dependances
+        run: pip install -r requirements.txt
+
+      - name: Recuperer les schemas d'outils
+        env:
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+          GOODBARBER_MCP_OAUTH_STATE: ${{ secrets.GOODBARBER_MCP_OAUTH_STATE }}
+        run: python scripts/test_mcp_tool_schemas.py
