@@ -2,8 +2,10 @@ name: WhatsOn - Publication GoodBarber
 
 on:
   workflow_dispatch: {}
-  schedule:
-    - cron: "55 5 * * *"   # 13:55 Bali (un seul run/jour, marge de 55min apres le cron du Tri)
+  # Programmation automatique retiree le 24 aout 2026 - remplacee par
+  # WhatsOn - Publication Direct (voir publication_direct.yml), qui sera
+  # lancee manuellement le temps de la validation en conditions reelles.
+  # Ce workflow reste disponible en declenchement manuel de secours.
 
 jobs:
   publication:
