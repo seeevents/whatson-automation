@@ -1,0 +1,32 @@
+name: WhatsOn - Test Publication Direct (isolé)
+
+on:
+  workflow_dispatch:
+    inputs:
+      record_id:
+        description: "ID Airtable a tester"
+        required: true
+        type: string
+
+jobs:
+  test-publication-direct:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dependances
+        run: pip install -r requirements.txt
+
+      - name: Tester Publication Direct
+        env:
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+          GOODBARBER_MCP_OAUTH_STATE: ${{ secrets.GOODBARBER_MCP_OAUTH_STATE }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+        run: python scripts/test_publication_direct.py "${{ inputs.record_id }}"
