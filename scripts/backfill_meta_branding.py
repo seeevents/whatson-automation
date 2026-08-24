@@ -8,7 +8,9 @@ Ne touche a AUCUN autre champ (titre visible, texte, categories, etc.).
 Usage: python scripts/backfill_meta_branding.py id1 id2 id3 ...
 """
 import logging
+import re
 import sys
+from difflib import SequenceMatcher
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -23,6 +25,24 @@ BRANDING_SUFFIX = " by SEE Events Bali"
 HASHTAGS = " #seeeventsbali #ifyouseeyouknow"
 
 
+def _slugify(text: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return slug[:200]
+
+
+def _dedupe_title(title: str) -> str:
+    """Corrige 'X at Venue at Venue2' -> 'X at Venue2' quand les deux
+    derniers segments 'at ...' sont tres similaires (pas forcement
+    identiques a la lettre pres, ex: 'Legend Bar' vs 'Legends Bar')."""
+    parts = re.split(r"\s+at\s+", title, flags=re.IGNORECASE)
+    if len(parts) < 3:
+        return title
+    similarity = SequenceMatcher(None, parts[-1].strip().lower(), parts[-2].strip().lower()).ratio()
+    if similarity > 0.75:
+        return " at ".join(parts[:-1])
+    return title
+
+
 async def _backfill_one(client, event_id: int) -> str:
     event = goodbarber_mcp_client.parse_tool_result(
         await client.call_tool("cms_get_event", {"id": event_id})
@@ -30,6 +50,7 @@ async def _backfill_one(client, event_id: int) -> str:
     meta = event.get("meta", {}) or {}
     title = meta.get("title", "") or event.get("title", "")
     description = meta.get("description", "") or ""
+    visible_title = event.get("title", "")
 
     changed = False
     if BRANDING_SUFFIX.strip() not in title:
@@ -39,14 +60,25 @@ async def _backfill_one(client, event_id: int) -> str:
         description = f"{description}{HASHTAGS}"
         changed = True
 
+    update_args = {"id": event_id}
+    fixed_visible_title = _dedupe_title(visible_title)
+    if fixed_visible_title != visible_title:
+        update_args["title"] = fixed_visible_title
+        update_args["slug"] = _slugify(fixed_visible_title)
+        changed = True
+    else:
+        # Meme si le titre visible n'a pas change, on resynchronise le slug
+        # (corrige les URLs figees sur un tres vieux titre).
+        new_slug = _slugify(visible_title)
+        update_args["slug"] = new_slug
+
     if not changed:
         return "deja_correct"
 
-    await client.call_tool(
-        "cms_update_event",
-        {"id": event_id, "meta": {"title": title[:250], "description": description[:500000]}},
-    )
+    update_args["meta"] = {"title": title[:250], "description": description[:500000]}
+    await client.call_tool("cms_update_event", update_args)
     return "corrige"
+
 
 
 async def _backfill_all(client, event_ids: list[int]) -> dict[str, int]:
