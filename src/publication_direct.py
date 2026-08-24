@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 
 from config import settings
 from src import airtable_client, claude_client, geocoding, goodbarber_mcp_client, msgraph_client
+from src.publication import _report_to_client_and_tracking
 
 logger = logging.getLogger("whatson.publication_direct")
 
@@ -41,6 +42,8 @@ CAT_TYPES = {
 SEO_SYSTEM_PROMPT = """Write a SEO meta description for the given event in the given venue in Bali in approximately 120 characters in english and using SEO longtail keywords. Respond with ONLY a JSON object, nothing else, format: {"description": "..."}"""
 
 CATEGORY_SYSTEM_PROMPT = """Tu classes un evenement dans UNE categorie de type parmi : DJ, Food, Kids, Art, Sport, Dance, Wellness, Other. Choisis DJ si un DJ ou artiste musical live est mentionne. Choisis Other si aucune categorie ne correspond clairement. Reponds avec UNIQUEMENT un objet JSON, format : {"category": "DJ|Food|Kids|Art|Sport|Dance|Wellness|Other"}"""
+
+TIME_SYSTEM_PROMPT = """Extrait l'heure de DEBUT precise mentionnee dans ce texte d'evenement, si elle existe (ex: "doors open at 9pm" -> "21:00", "starts 8pm" -> "20:00", "from 6 to 9pm" -> "18:00"). Si AUCUNE heure precise n'est mentionnee (seulement une date ou un jour), reponds avec une chaine vide. Reponds avec UNIQUEMENT un objet JSON, format : {"time": "HH:MM" ou ""}"""
 
 
 def _extract_instagram_username(url: str) -> str:
@@ -111,6 +114,24 @@ def _classify_type_category(titre: str, caption: str) -> int:
         return CAT_TYPES["Other"]
 
 
+def _extract_event_time(caption: str) -> tuple[int, int] | None:
+    """Petit appel Claude isole - extrait une heure precise (heure, minute)
+    si mentionnee dans le texte, sinon None (l'event reste allDay)."""
+    if not caption:
+        return None
+    try:
+        response = claude_client.call_claude(TIME_SYSTEM_PROMPT, f"Texte: {caption}", max_tokens=50)
+        result = claude_client.extract_json_from_response(response)
+        time_str = result.get("time", "")
+        if not time_str or ":" not in time_str:
+            return None
+        hour, minute = time_str.split(":")
+        return int(hour), int(minute)
+    except (claude_client.ClaudeError, ValueError) as exc:
+        logger.warning("Echec extraction heure: %s", exc)
+        return None
+
+
 def _extract_category_ids(event: dict) -> list[int]:
     """Extrait les IDs de categories depuis la structure imbriquee 'sections'
     renvoyee par GoodBarber (sections[].categories[].id), pas un simple
@@ -167,7 +188,18 @@ async def publish_one_async(client, record: dict) -> dict:
     date_category = _compute_date_category(date_str)
     type_category = _classify_type_category(titre, caption)
     seo_description = _generate_seo_description(titre, venue_name)
+    event_time = _extract_event_time(caption)
     full_title = f"{titre} at {venue_name}"
+
+    if event_time:
+        hour, minute = event_time
+        sort_date_iso = _bali_to_goodbarber_iso(date_str, hour=hour, minute=minute)
+        end_date_iso = _bali_to_goodbarber_iso(date_str, hour=23, minute=59)
+        all_day = False
+    else:
+        sort_date_iso = _bali_to_goodbarber_iso(date_str)
+        end_date_iso = _bali_to_goodbarber_iso(date_str, hour=23, minute=59)
+        all_day = True
 
     existing_ref = await _find_existing_event(client, venue_name, instagram)
 
@@ -190,9 +222,9 @@ async def publish_one_async(client, record: dict) -> dict:
             "id": event_id,
             "title": full_title,
             "categories": new_categories,
-            "sortDate": _bali_to_goodbarber_iso(date_str),
-            "endDate": _bali_to_goodbarber_iso(date_str, hour=23, minute=59),
-            "allDay": True,
+            "sortDate": sort_date_iso,
+            "endDate": end_date_iso,
+            "allDay": all_day,
             "meta": {"title": full_title[:250], "description": seo_description[:500000]},
             "urlEvent": f"https://www.instagram.com/{instagram}/" if instagram else None,
         }
@@ -203,27 +235,38 @@ async def publish_one_async(client, record: dict) -> dict:
             await client.call_tool("cms_list_event_paragraphs", {"id": event_id})
         )
         text_paragraphs = [p for p in paragraphs.get("items", []) if p.get("type") == "text"]
-        content_html = f'<span style="color:#FFFFFF">{caption}</span>'
+        new_content = f'<span style="color:#FFFFFF">{caption}</span>'
+
         if text_paragraphs:
+            existing_content = text_paragraphs[0].get("content", "")
+            if caption and caption not in existing_content:
+                # Fusion simple : ajoute le nouveau texte a la suite de l'existant
+                # plutot que de l'ecraser (evite de perdre les infos des posts
+                # precedents sur le meme evenement - cas des festivals multi-posts).
+                merged_content = f'{existing_content}<br/>{new_content}' if existing_content else new_content
+            else:
+                merged_content = existing_content or new_content
             await client.call_tool(
                 "cms_update_event_paragraph",
-                {"id": event_id, "paragraph_id": text_paragraphs[0]["id"], "content": content_html},
+                {"id": event_id, "paragraph_id": text_paragraphs[0]["id"], "content": merged_content},
             )
         else:
             await client.call_tool(
-                "cms_create_event_paragraph", {"id": event_id, "type": "text", "content": content_html}
+                "cms_create_event_paragraph", {"id": event_id, "type": "text", "content": new_content}
             )
 
-        return {"status": "UPDATED", "goodbarber_id": event_id, "message": f"Evenement mis a jour (id {event_id})."}
+        result = {"status": "UPDATED", "goodbarber_id": event_id, "message": f"Evenement mis a jour (id {event_id})."}
+        _report_to_client_and_tracking(record, result["status"], result["message"], event_id)
+        return result
 
     else:
         geo = geocoding.geocode_venue(venue_name)
         create_args = {
             "title": full_title,
             "categories": [date_category, type_category],
-            "sortDate": _bali_to_goodbarber_iso(date_str),
-            "endDate": _bali_to_goodbarber_iso(date_str, hour=23, minute=59),
-            "allDay": True,
+            "sortDate": sort_date_iso,
+            "endDate": end_date_iso,
+            "allDay": all_day,
             "meta": {"title": full_title[:250], "description": seo_description[:500000]},
             "urlEvent": f"https://www.instagram.com/{instagram}/" if instagram else None,
         }
@@ -246,4 +289,75 @@ async def publish_one_async(client, record: dict) -> dict:
                 {"id": event_id, "type": "photo", "originalThumbnail": image_url, "isThumbnail": True},
             )
 
-        return {"status": "CREATED", "goodbarber_id": event_id, "message": f"Nouvel evenement cree (id {event_id})."}
+        result = {"status": "CREATED", "goodbarber_id": event_id, "message": f"Nouvel evenement cree (id {event_id})."}
+        _report_to_client_and_tracking(record, result["status"], result["message"], event_id)
+        return result
+
+
+async def _run_all_async(client, records: list[dict]) -> dict[str, int]:
+    """Traite tous les enregistrements SEQUENTIELLEMENT dans une seule
+    session MCP (evite le cout de reconnexion ~5-10s par enregistrement)."""
+    summary: dict[str, int] = {}
+    total = len(records)
+    for i, record in enumerate(records, start=1):
+        record_id = record["id"]
+        try:
+            result = await publish_one_async(client, record)
+            status = result["status"]
+            fields = {settings.FLD_ALERTE: result["message"]}
+            if status == "ERROR":
+                fields[settings.FLD_STATUT] = settings.STATUT_VALIDE
+            else:
+                fields[settings.FLD_STATUT] = settings.STATUT_RAPPORTE
+                fields[settings.FLD_GOODBARBER_ID] = str(result["goodbarber_id"]) if result["goodbarber_id"] else ""
+            airtable_client.update_record(settings.AIRTABLE_TABLE_EVENTS, record_id, fields)
+            final_status = fields[settings.FLD_STATUT]
+        except Exception as exc:
+            logger.exception("Echec non-capture pour %s - remis en Valide", record_id)
+            airtable_client.update_record(
+                settings.AIRTABLE_TABLE_EVENTS,
+                record_id,
+                {
+                    settings.FLD_STATUT: settings.STATUT_VALIDE,
+                    settings.FLD_ALERTE: f"ECHEC AUTOMATIQUE (Publication Direct) : {exc}. A traiter manuellement.",
+                },
+            )
+            final_status = settings.STATUT_VALIDE
+
+        summary[final_status] = summary.get(final_status, 0) + 1
+        if i % 10 == 0 or i == total:
+            logger.info("Progression: %d/%d traitees (%s)", i, total, summary)
+
+    return summary
+
+
+def run(dry_run_record_ids: list[str] | None = None) -> dict[str, int]:
+    """
+    Publie toutes les lignes 'Validé' actuelles via le client MCP direct
+    (sans agent Claude pour l'orchestration - petits appels Claude isoles
+    uniquement pour SEO/categorie/heure). Si `dry_run_record_ids` est
+    fourni, ne traite que ces IDs precis (test isole).
+    """
+    if dry_run_record_ids:
+        records = []
+        for rid in dry_run_record_ids:
+            found = airtable_client.search_records(
+                settings.AIRTABLE_TABLE_EVENTS, formula=f"RECORD_ID()='{rid}'", max_records=1
+            )
+            if found:
+                records.append(found[0])
+            else:
+                logger.warning("ID '%s' introuvable - ignore", rid)
+    else:
+        records = airtable_client.search_records(
+            settings.AIRTABLE_TABLE_EVENTS,
+            formula=f"{{Statut}} = '{settings.STATUT_VALIDE}'",
+            max_records=settings.MAX_RECORDS_PER_RUN,
+        )
+
+    logger.info("Publication Direct: %d ligne(s) a traiter", len(records))
+    summary = goodbarber_mcp_client.run_in_session(
+        lambda client: _run_all_async(client, records), step_timeout=3600.0
+    )
+    logger.info("Publication Direct terminee: %s", summary)
+    return summary
