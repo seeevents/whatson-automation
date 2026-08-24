@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       record_id:
-        description: "ID Airtable a tester"
+        description: "ID(s) Airtable a tester - un seul, ou plusieurs separes par des espaces"
         required: true
         type: string
 
@@ -22,11 +22,14 @@ jobs:
       - name: Installer les dependances
         run: pip install -r requirements.txt
 
-      - name: Tester Publication Direct
+      - name: Tester Publication Direct (boucle complete)
         env:
           AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
           GOODBARBER_MCP_OAUTH_STATE: ${{ secrets.GOODBARBER_MCP_OAUTH_STATE }}
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
-        run: python scripts/test_publication_direct.py "${{ inputs.record_id }}"
+          MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
+          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
+          MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
+        run: python scripts/run_publication_direct_test.py ${{ inputs.record_id }}
