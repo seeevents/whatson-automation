@@ -83,6 +83,20 @@ def _request(method: str, url: str, **kwargs) -> dict[str, Any]:
                 logger.warning("Graph rate-limit (429), retry dans %ss", wait)
                 time.sleep(wait)
                 continue
+            if resp.status_code in (502, 503, 504):
+                # Erreurs serveur transitoires (ex: surcharge Microsoft quand
+                # plusieurs batches paralleles appellent la meme API en meme
+                # temps) - retry avec backoff exponentiel plutot que d'echouer
+                # immediatement (observe en production le 23 aout 2026).
+                wait = 5 * attempt
+                logger.warning(
+                    "Graph erreur serveur transitoire (%s), retry dans %ss (tentative %d/%d)",
+                    resp.status_code, wait, attempt, MAX_RETRIES,
+                )
+                if attempt < MAX_RETRIES:
+                    time.sleep(wait)
+                    continue
+                raise MSGraphError(f"{resp.status_code} {resp.reason}: {resp.text[:500]}")
             if not resp.ok:
                 raise MSGraphError(f"{resp.status_code} {resp.reason}: {resp.text[:500]}")
             return resp.json()
