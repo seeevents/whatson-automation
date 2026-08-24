@@ -111,7 +111,16 @@ def _classify_type_category(titre: str, caption: str) -> int:
         return CAT_TYPES["Other"]
 
 
-async def _find_existing_event(client, venue_name: str, instagram_handle: str) -> dict | None:
+def _extract_category_ids(event: dict) -> list[int]:
+    """Extrait les IDs de categories depuis la structure imbriquee 'sections'
+    renvoyee par GoodBarber (sections[].categories[].id), pas un simple
+    champ 'categories' comme on pourrait le supposer."""
+    ids = []
+    for section in event.get("sections", []):
+        for cat in section.get("categories", []):
+            if "id" in cat:
+                ids.append(cat["id"])
+    return ids
     """Dedoublonnage en Python pur : cherche un event existant pour cette venue."""
     target_username = instagram_handle.lower().rstrip("/")
 
@@ -157,13 +166,20 @@ async def publish_one_async(client, record: dict) -> dict:
     seo_description = _generate_seo_description(titre, venue_name)
     full_title = f"{titre} at {venue_name}"
 
-    existing = await _find_existing_event(client, venue_name, instagram)
+    existing_ref = await _find_existing_event(client, venue_name, instagram)
 
-    if existing:
-        event_id = existing["id"]
-        current_categories = existing.get("categories", [])
+    if existing_ref:
+        event_id = existing_ref["id"]
+        # Recupere TOUJOURS le detail complet (sections/categories) via
+        # cms_get_event - la recherche cms_list_events peut renvoyer des
+        # donnees partielles, on ne veut jamais construire l'update sur
+        # des infos incompletes.
+        existing = goodbarber_mcp_client.parse_tool_result(
+            await client.call_tool("cms_get_event", {"id": event_id})
+        )
+        current_categories = _extract_category_ids(existing)
         non_date_categories = [c for c in current_categories if c not in (CAT_TODAY, CAT_THIS_WEEK, CAT_LATER)]
-        new_categories = list(set(non_date_categories + [date_category]))
+        new_categories = list(set(non_date_categories + [date_category, type_category]))
         if CAT_TOP_EVENTS in current_categories and CAT_TOP_EVENTS not in new_categories:
             new_categories.append(CAT_TOP_EVENTS)
 
