@@ -32,11 +32,20 @@ async def _get_plans(client):
     return results
 
 
+async def _get_schemas(client):
+    result = await client.list_tools()
+    tool_names = {
+        "cms_list_events", "cms_get_event", "cms_create_event", "cms_update_event",
+        "cms_list_event_paragraphs", "cms_create_event_paragraph", "cms_update_event_paragraph",
+    }
+    return {t.name: t.inputSchema for t in result.tools if t.name in tool_names}
+
+
 def main() -> int:
-    plans = goodbarber_mcp_client.run_in_session(_get_plans)
-    for name, plan in plans.items():
-        print(f"\n{'=' * 70}\n{name}\n{'=' * 70}")
-        print(json.dumps(plan, indent=2)[:3000])
+    schemas = goodbarber_mcp_client.run_in_session(_get_schemas)
+    for name, schema in schemas.items():
+        print(f"\n{'=' * 70}\n{name} - SCHEMA COMPLET\n{'=' * 70}")
+        print(json.dumps(schema, indent=2))
     return 0
 
 
