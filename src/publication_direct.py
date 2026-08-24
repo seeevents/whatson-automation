@@ -55,6 +55,17 @@ def _extract_instagram_username(url: str) -> str:
     return match.group(1).lower().rstrip("/") if match else ""
 
 
+def _slugify(text: str) -> str:
+    """Convertit un titre en slug URL (minuscules, tirets). GoodBarber ne
+    rafraichit JAMAIS le slug automatiquement sur une mise a jour - il faut
+    le renvoyer explicitement a chaque fois pour que l'URL reste synchro
+    avec le titre courant (sinon elle reste figee sur le tout premier
+    titre de creation, potentiellement tres ancien apres plusieurs
+    mises a jour)."""
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return slug[:200]
+
+
 def _compute_date_category(event_date_str: str) -> int:
     """Reproduit la formule de categorie de date (Today/This Week/Later)."""
     if not event_date_str:
@@ -229,8 +240,14 @@ async def publish_one_async(client, record: dict) -> dict:
     type_category = _classify_type_category(titre, caption)
     seo_description = _generate_seo_description(titre, venue_name)
     event_time = _extract_event_time(caption)
-    full_title = f"{titre} at {venue_name}"
+    # Evite "X at Venue at Venue" si le titre extrait contient deja le nom
+    # de la venue (arrive parfois selon comment Brique 3 a extrait le titre).
+    if venue_name and venue_name.lower() in titre.lower():
+        full_title = titre
+    else:
+        full_title = f"{titre} at {venue_name}"
     meta_title = f"{full_title} by SEE Events Bali"
+    slug = _slugify(full_title)
 
     if event_time:
         hour, minute = event_time
@@ -268,6 +285,7 @@ async def publish_one_async(client, record: dict) -> dict:
             "allDay": all_day,
             "meta": {"title": meta_title[:250], "description": seo_description[:500000]},
             "urlEvent": f"https://www.instagram.com/{instagram}/" if instagram else None,
+            "slug": slug,
         }
         update_args = {k: v for k, v in update_args.items() if v is not None}
         await client.call_tool("cms_update_event", update_args)
