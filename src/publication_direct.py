@@ -89,7 +89,7 @@ def _generate_seo_description(titre: str, venue: str) -> str:
         response = claude_client.call_claude(
             SEO_SYSTEM_PROMPT,
             f"Event: {titre}\nVenue: {venue}, Bali",
-            max_tokens=200,
+            max_tokens=300,
         )
         result = claude_client.extract_json_from_response(response)
         return result.get("description", "")
