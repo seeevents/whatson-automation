@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 
 from config import settings
 from src import airtable_client, claude_client, geocoding, goodbarber_mcp_client, msgraph_client
@@ -144,9 +145,25 @@ def _extract_category_ids(event: dict) -> list[int]:
     return ids
 
 
-async def _find_existing_event(client, venue_name: str, instagram_handle: str) -> dict | None:
-    """Dedoublonnage en Python pur : cherche un event existant pour cette venue."""
+def _title_similarity(a: str, b: str) -> float:
+    """Similarite de texte simple (0-1), en Python pur - utilisee pour la
+    detection de doublon potentiel (ex: event cree manuellement sans urlEvent)."""
+    return SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio()
+
+
+async def _find_existing_event(
+    client, venue_name: str, instagram_handle: str, titre: str = "", date_str: str = ""
+) -> tuple[dict | None, str]:
+    """
+    Dedoublonnage en Python pur : cherche un event existant pour cette venue.
+    Retourne (candidat_confirme_ou_None, note_doublon_potentiel).
+    La note est non-vide si un candidat NON confirme (urlEvent absent/different)
+    mais avec un titre tres similaire existe deja a la MEME date - signale
+    plutot que fusionne automatiquement (trop risque de melanger deux
+    evenements reellement differents), pour que l'equipe verifie manuellement.
+    """
     target_username = instagram_handle.lower().rstrip("/")
+    unconfirmed_same_date_similar = None
 
     for search_term in (venue_name, instagram_handle):
         if not search_term:
@@ -163,8 +180,25 @@ async def _find_existing_event(client, venue_name: str, instagram_handle: str) -
                 )
                 url_event = detail.get("urlEvent", "")
             if _extract_instagram_username(url_event) == target_username:
-                return candidate
-    return None
+                return candidate, ""
+
+            # Pas de correspondance confirmee - verifie si c'est un doublon
+            # potentiel (meme date + titre tres similaire, ex: event cree
+            # manuellement sans urlEvent renseigne).
+            candidate_date = str(candidate.get("sortDate", ""))[:10]
+            if titre and date_str and candidate_date == date_str:
+                similarity = _title_similarity(titre, candidate.get("title", ""))
+                if similarity > 0.5:
+                    unconfirmed_same_date_similar = candidate
+
+    if unconfirmed_same_date_similar:
+        note = (
+            f"DOUBLON POTENTIEL: event existant similaire trouve (id {unconfirmed_same_date_similar['id']}, "
+            f"titre '{unconfirmed_same_date_similar.get('title', '')}') a la meme date - verifier manuellement."
+        )
+        return None, note
+
+    return None, ""
 
 
 async def publish_one_async(client, record: dict) -> dict:
@@ -201,7 +235,7 @@ async def publish_one_async(client, record: dict) -> dict:
         end_date_iso = _bali_to_goodbarber_iso(date_str, hour=23, minute=59)
         all_day = True
 
-    existing_ref = await _find_existing_event(client, venue_name, instagram)
+    existing_ref, doublon_note = await _find_existing_event(client, venue_name, instagram, titre, date_str)
 
     if existing_ref:
         event_id = existing_ref["id"]
@@ -255,6 +289,18 @@ async def publish_one_async(client, record: dict) -> dict:
                 "cms_create_event_paragraph", {"id": event_id, "type": "text", "content": new_content}
             )
 
+        # Multi-images : si cette source apporte une nouvelle image (differente
+        # du thumbnail principal deja utilise), l'ajoute comme photo
+        # supplementaire plutot que de l'ignorer (cas festivals multi-artistes).
+        if image_url:
+            existing_photos = [p for p in paragraphs.get("items", []) if p.get("type") == "photo"]
+            already_present = any(image_url in (p.get("originalThumbnail") or "") for p in existing_photos)
+            if not already_present and len(existing_photos) < 8:
+                await client.call_tool(
+                    "cms_create_event_paragraph",
+                    {"id": event_id, "type": "photo", "originalThumbnail": image_url, "isThumbnail": False},
+                )
+
         result = {"status": "UPDATED", "goodbarber_id": event_id, "message": f"Evenement mis a jour (id {event_id})."}
         _report_to_client_and_tracking(record, result["status"], result["message"], event_id)
         return result
@@ -289,7 +335,9 @@ async def publish_one_async(client, record: dict) -> dict:
                 {"id": event_id, "type": "photo", "originalThumbnail": image_url, "isThumbnail": True},
             )
 
-        result = {"status": "CREATED", "goodbarber_id": event_id, "message": f"Nouvel evenement cree (id {event_id})."}
+        base_message = f"Nouvel evenement cree (id {event_id})."
+        message = f"{base_message} {doublon_note}".strip() if doublon_note else base_message
+        result = {"status": "CREATED", "goodbarber_id": event_id, "message": message}
         _report_to_client_and_tracking(record, result["status"], result["message"], event_id)
         return result
 
