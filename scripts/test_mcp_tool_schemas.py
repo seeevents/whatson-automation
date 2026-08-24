@@ -38,7 +38,7 @@ async def _get_schemas(client):
         "cms_list_events", "cms_get_event", "cms_create_event", "cms_update_event",
         "cms_list_event_paragraphs", "cms_create_event_paragraph", "cms_update_event_paragraph",
     }
-    return {t.name: t.inputSchema for t in result.tools if t.name in tool_names}
+    return {t.name: t.input_schema for t in result.tools if t.name in tool_names}
 
 
 def main() -> int:
