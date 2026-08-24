@@ -121,6 +121,9 @@ def _extract_category_ids(event: dict) -> list[int]:
             if "id" in cat:
                 ids.append(cat["id"])
     return ids
+
+
+async def _find_existing_event(client, venue_name: str, instagram_handle: str) -> dict | None:
     """Dedoublonnage en Python pur : cherche un event existant pour cette venue."""
     target_username = instagram_handle.lower().rstrip("/")
 
