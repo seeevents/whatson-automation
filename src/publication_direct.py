@@ -84,8 +84,13 @@ def _bali_to_goodbarber_iso(date_str: str, hour: int = 20, minute: int = 0) -> s
     return dt_goodbarber.strftime("%Y-%m-%dT%H:%M:%S+02:00")
 
 
+SEO_HASHTAGS = " #seeeventsbali #ifyouseeyouknow"
+
+
 def _generate_seo_description(titre: str, venue: str) -> str:
-    """Petit appel Claude isole (pas d'outils MCP) - uniquement la description SEO."""
+    """Petit appel Claude isole (pas d'outils MCP) - uniquement la description SEO.
+    Ajoute toujours les hashtags de marque a la fin (regle n°6, oublies dans
+    la version initiale de Publication Direct - corrige le 24 aout 2026)."""
     try:
         response = claude_client.call_claude(
             SEO_SYSTEM_PROMPT,
@@ -93,10 +98,11 @@ def _generate_seo_description(titre: str, venue: str) -> str:
             max_tokens=300,
         )
         result = claude_client.extract_json_from_response(response)
-        return result.get("description", "")
+        description = result.get("description", "")
     except claude_client.ClaudeError as exc:
         logger.warning("Echec generation SEO pour '%s': %s", titre, exc)
-        return f"Join {titre} at {venue} in Bali - live event, great vibes, don't miss out."
+        description = f"Join {titre} at {venue} in Bali - live event, great vibes, don't miss out."
+    return description + SEO_HASHTAGS
 
 
 def _classify_type_category(titre: str, caption: str) -> int:
@@ -224,6 +230,7 @@ async def publish_one_async(client, record: dict) -> dict:
     seo_description = _generate_seo_description(titre, venue_name)
     event_time = _extract_event_time(caption)
     full_title = f"{titre} at {venue_name}"
+    meta_title = f"{full_title} by SEE Events Bali"
 
     if event_time:
         hour, minute = event_time
@@ -259,7 +266,7 @@ async def publish_one_async(client, record: dict) -> dict:
             "sortDate": sort_date_iso,
             "endDate": end_date_iso,
             "allDay": all_day,
-            "meta": {"title": full_title[:250], "description": seo_description[:500000]},
+            "meta": {"title": meta_title[:250], "description": seo_description[:500000]},
             "urlEvent": f"https://www.instagram.com/{instagram}/" if instagram else None,
         }
         update_args = {k: v for k, v in update_args.items() if v is not None}
@@ -313,7 +320,7 @@ async def publish_one_async(client, record: dict) -> dict:
             "sortDate": sort_date_iso,
             "endDate": end_date_iso,
             "allDay": all_day,
-            "meta": {"title": full_title[:250], "description": seo_description[:500000]},
+            "meta": {"title": meta_title[:250], "description": seo_description[:500000]},
             "urlEvent": f"https://www.instagram.com/{instagram}/" if instagram else None,
         }
         if geo:
