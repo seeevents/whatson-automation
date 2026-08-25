@@ -2,6 +2,8 @@ name: WhatsOn - Publication Direct (sans Claude orchestrateur)
 
 on:
   workflow_dispatch: {}
+  schedule:
+    - cron: "30 6 * * *"  # 14:30 Bali (UTC+8) - marge de 90min apres le cron du Tri (13h00) pour absorber retard+duree observes (Tri: jusqu'a ~75min, marge de securite)
 
 jobs:
   publication-direct:
