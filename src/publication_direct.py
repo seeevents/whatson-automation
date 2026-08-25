@@ -404,33 +404,70 @@ async def _run_all_async(client, records: list[dict]) -> dict[str, int]:
     return summary
 
 
-def run(dry_run_record_ids: list[str] | None = None) -> dict[str, int]:
+def _fetch_records_to_process(dry_run_record_ids: list[str] | None) -> list[dict]:
+    """Recupere les enregistrements encore 'Validé' a traiter. Utilisee au
+    demarrage ET a chaque tentative de reprise (ne re-recupere jamais les
+    lignes deja marquees 'Rapporté' par une tentative precedente)."""
+    if dry_run_record_ids:
+        records = []
+        for rid in dry_run_record_ids:
+            found = airtable_client.search_records(
+                settings.AIRTABLE_TABLE_EVENTS,
+                formula=f"AND(RECORD_ID()='{rid}', {{Statut}} = '{settings.STATUT_VALIDE}')",
+                max_records=1,
+            )
+            if found:
+                records.append(found[0])
+        return records
+    return airtable_client.search_records(
+        settings.AIRTABLE_TABLE_EVENTS,
+        formula=f"{{Statut}} = '{settings.STATUT_VALIDE}'",
+        max_records=settings.MAX_RECORDS_PER_RUN,
+    )
+
+
+def run(dry_run_record_ids: list[str] | None = None, max_session_retries: int = 3) -> dict[str, int]:
     """
     Publie toutes les lignes 'Validé' actuelles via le client MCP direct
     (sans agent Claude pour l'orchestration - petits appels Claude isoles
     uniquement pour SEO/categorie/heure). Si `dry_run_record_ids` est
     fourni, ne traite que ces IDs precis (test isole).
-    """
-    if dry_run_record_ids:
-        records = []
-        for rid in dry_run_record_ids:
-            found = airtable_client.search_records(
-                settings.AIRTABLE_TABLE_EVENTS, formula=f"RECORD_ID()='{rid}'", max_records=1
-            )
-            if found:
-                records.append(found[0])
-            else:
-                logger.warning("ID '%s' introuvable - ignore", rid)
-    else:
-        records = airtable_client.search_records(
-            settings.AIRTABLE_TABLE_EVENTS,
-            formula=f"{{Statut}} = '{settings.STATUT_VALIDE}'",
-            max_records=settings.MAX_RECORDS_PER_RUN,
-        )
 
-    logger.info("Publication Direct: %d ligne(s) a traiter", len(records))
-    summary = goodbarber_mcp_client.run_in_session(
-        lambda client: _run_all_async(client, records), step_timeout=3600.0
-    )
-    logger.info("Publication Direct terminee: %s", summary)
-    return summary
+    Resilience : une session MCP couvre potentiellement des dizaines de
+    minutes pour un gros volume - si un incident reseau transitoire fait
+    tomber la connexion en cours de route (observe le 25 aout 2026), on
+    ouvre une NOUVELLE session et on reprend sur ce qui reste encore
+    'Validé', plutot que de perdre tout le travail deja accompli.
+    """
+    combined_summary: dict[str, int] = {}
+    total_seen = 0
+
+    for attempt in range(1, max_session_retries + 1):
+        records = _fetch_records_to_process(dry_run_record_ids)
+        if not records:
+            break
+        total_seen += len(records)
+        logger.info(
+            "Publication Direct (tentative %d/%d): %d ligne(s) restante(s) a traiter",
+            attempt, max_session_retries, len(records),
+        )
+        try:
+            summary = goodbarber_mcp_client.run_in_session(
+                lambda client: _run_all_async(client, records), step_timeout=3600.0
+            )
+            for status, count in summary.items():
+                combined_summary[status] = combined_summary.get(status, 0) + count
+            break  # tout s'est bien passe (ou les echecs individuels sont deja geres/comptes)
+        except goodbarber_mcp_client.GoodBarberMCPError as exc:
+            logger.error(
+                "Session MCP interrompue (tentative %d/%d): %s - %s",
+                attempt, max_session_retries, exc,
+                "nouvelle tentative sur les lignes restantes" if attempt < max_session_retries else "abandon",
+            )
+            if attempt == max_session_retries:
+                # Les lignes non traitees restent 'Validé' - rien n'est perdu,
+                # elles seront reprises au prochain run.
+                combined_summary["SESSION_INTERROMPUE"] = combined_summary.get("SESSION_INTERROMPUE", 0) + 1
+
+    logger.info("Publication Direct terminee: %s (sur %d ligne(s) vues au total)", combined_summary, total_seen)
+    return combined_summary
