@@ -117,3 +117,28 @@ def batch_update_records(table_id: str, updates: list[dict[str, Any]]) -> list[d
         data = _request("PATCH", url, json={"records": chunk})
         results.extend(data.get("records", []))
     return results
+
+
+def delete_records(table_id: str, record_ids: list[str]) -> int:
+    """
+    Supprime jusqu'a 10 enregistrements par appel (limite Airtable).
+    Retourne le nombre reellement supprime.
+    """
+    import urllib.parse
+
+    url = f"{BASE_URL}/{AIRTABLE_BASE_ID}/{table_id}"
+    deleted = 0
+    for i in range(0, len(record_ids), 10):
+        chunk = record_ids[i : i + 10]
+        params = "&".join(f"records[]={urllib.parse.quote(rid)}" for rid in chunk)
+        data = _request("DELETE", f"{url}?{params}")
+        deleted += sum(1 for r in data.get("records", []) if r.get("deleted"))
+    return deleted
+
+
+def delete_all_records(table_id: str) -> int:
+    """Supprime TOUS les enregistrements d'une table. Retourne le nombre supprime."""
+    records = search_records(table_id, formula="TRUE()", max_records=100000)
+    if not records:
+        return 0
+    return delete_records(table_id, [r["id"] for r in records])

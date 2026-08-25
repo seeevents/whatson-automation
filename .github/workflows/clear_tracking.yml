@@ -1,0 +1,27 @@
+name: WhatsOn - Nettoyage quotidien Events_Tracking
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 0 * * *"  # 08:00 Bali (UTC+8) - avant le Batch (11h30), marge large de securite
+
+jobs:
+  clear-tracking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dependances
+        run: pip install -r requirements.txt
+
+      - name: Vider Events_Tracking
+        env:
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+        run: python scripts/clear_tracking.py
