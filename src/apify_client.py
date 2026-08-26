@@ -37,12 +37,17 @@ def _run_sync_get_dataset_items(actor_id: str, input_body: dict[str, Any]) -> li
         raise ApifyError(f"Erreur reseau: {exc}") from exc
 
 
-def scrape_posts(instagram_url: str, limit: int = 12) -> list[dict[str, Any]]:
-    """Scrape les derniers posts d'un compte Instagram."""
+def scrape_posts(instagram_url: str, limit: int = 6) -> list[dict[str, Any]]:
+    """Scrape les derniers posts d'un compte Instagram.
+    onlyPostsNewerThan='2 days' : evite de re-payer/re-telecharger des posts
+    deja vus lors des scrapes precedents (le scraping tourne quotidiennement,
+    2 jours de marge absorbe les decalages horaires/de planning sans rien
+    manquer). Reduit resultsLimit de 12 a 6 (levier cout Apify, 26 aout 2026)."""
     input_body = {
         "directUrls": [instagram_url],
         "resultsType": "posts",
         "resultsLimit": limit,
+        "onlyPostsNewerThan": "2 days",
         "addParentData": False,
     }
     try:
