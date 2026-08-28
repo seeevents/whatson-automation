@@ -4,7 +4,7 @@ on:
   workflow_dispatch: {}
   # Programmation deplacee vers un scheduler externe (cron-job.org) le 28
   # aout 2026 - le cron interne GitHub Actions s'est avere peu fiable.
-  # Declenchement: 14:00 Bali (UTC+8) via appel API externe.
+  # Declenchement: 13:30 Bali (UTC+8) via appel API externe.
 
 jobs:
   publication-direct:
