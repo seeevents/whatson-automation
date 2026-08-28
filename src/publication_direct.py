@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 
@@ -464,6 +465,14 @@ def run(dry_run_record_ids: list[str] | None = None, max_session_retries: int = 
                 attempt, max_session_retries, exc,
                 "nouvelle tentative sur les lignes restantes" if attempt < max_session_retries else "abandon",
             )
+            if attempt < max_session_retries:
+                # Delai croissant avant de reessayer (30s, 60s...) - laisse le
+                # temps a un incident reseau transitoire de se resorber plutot
+                # que de re-frapper immediatement un service en difficulte
+                # (observe le 28 aout 2026: 3 tentatives en 15s, toutes echouees).
+                wait_seconds = 30 * attempt
+                logger.info("Attente de %ds avant la prochaine tentative...", wait_seconds)
+                time.sleep(wait_seconds)
             if attempt == max_session_retries:
                 # Les lignes non traitees restent 'Validé' - rien n'est perdu,
                 # elles seront reprises au prochain run.
