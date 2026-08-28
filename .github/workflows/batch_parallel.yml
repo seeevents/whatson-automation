@@ -2,8 +2,10 @@ name: WhatsOn - Brique 3 (8 batches paralleles)
 
 on:
   workflow_dispatch: {}
-  schedule:
-    - cron: "30 3 * * *"  # 11:30 Bali (UTC+8) tous les jours
+  # Programmation deplacee vers un scheduler externe (cron-job.org) le 28
+  # aout 2026 - le cron interne GitHub Actions s'est avere peu fiable
+  # (retards de plusieurs heures observes, jusqu'a 11h le 27 aout).
+  # Declenchement: 11:30 Bali (UTC+8) via appel API externe.
 
 jobs:
   batch:

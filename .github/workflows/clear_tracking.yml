@@ -2,8 +2,9 @@ name: WhatsOn - Nettoyage quotidien Events_Tracking
 
 on:
   workflow_dispatch: {}
-  schedule:
-    - cron: "0 0 * * *"  # 08:00 Bali (UTC+8) - avant le Batch (11h30), marge large de securite
+  # Programmation deplacee vers un scheduler externe (cron-job.org) le 28
+  # aout 2026 - le cron interne GitHub Actions s'est avere peu fiable.
+  # Declenchement: 08:00 Bali (UTC+8) via appel API externe.
 
 jobs:
   clear-tracking:
