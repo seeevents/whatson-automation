@@ -43,6 +43,13 @@ def _request(method: str, url: str, **kwargs) -> dict[str, Any]:
                 logger.warning("Airtable rate-limit (429), retry dans %ss (tentative %s/%s)", wait, attempt, MAX_RETRIES)
                 time.sleep(wait)
                 continue
+            if not resp.ok:
+                # Capture le corps de la reponse AVANT de lever l'erreur - Airtable
+                # renvoie normalement un message precis (ex: champ invalide, valeur
+                # hors liste) qui etait jusqu'ici perdu (raise_for_status() seul ne
+                # donne que le code HTTP generique). Ajoute le 31 aout 2026 suite a
+                # des erreurs 422 recurrentes et non diagnostiquees.
+                logger.error("Airtable %s %s: corps de la reponse: %s", resp.status_code, url, resp.text[:1000])
             resp.raise_for_status()
             return resp.json()
         except requests.RequestException as exc:
