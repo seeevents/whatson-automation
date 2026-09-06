@@ -297,15 +297,37 @@ async def publish_one_async(client, record: dict) -> dict:
         text_paragraphs = [p for p in paragraphs.get("items", []) if p.get("type") == "text"]
         new_content = f'<span style="color:#FFFFFF">{caption}</span>'
 
+        # Determine si l'event existant concerne probablement le MEME
+        # evenement reel (fusion multi-sources legitime, ex: plusieurs posts
+        # sur la meme soiree) ou si c'est une reutilisation de conteneur pour
+        # un evenement DIFFERENT (cas normal du dedoublonnage - Regle n1:
+        # reutiliser le plus perime). Dans ce second cas, l'ancien contenu
+        # (flyers, texte) n'a plus rien a voir et doit etre REMPLACE, pas
+        # fusionne - sinon les anciens flyers/descriptifs s'accumulent
+        # indument (signale par Katia le 3 sept 2026).
+        existing_sort_date = str(existing.get("sortDate", ""))[:10]
+        is_same_event = False
+        if existing_sort_date and date_str:
+            try:
+                d1 = datetime.strptime(existing_sort_date, "%Y-%m-%d").date()
+                d2 = datetime.strptime(date_str, "%Y-%m-%d").date()
+                is_same_event = abs((d1 - d2).days) <= 2
+            except ValueError:
+                is_same_event = False
+
         if text_paragraphs:
             existing_content = text_paragraphs[0].get("content", "")
-            if caption and caption not in existing_content:
-                # Fusion simple : ajoute le nouveau texte a la suite de l'existant
-                # plutot que de l'ecraser (evite de perdre les infos des posts
-                # precedents sur le meme evenement - cas des festivals multi-posts).
+            if is_same_event and caption and caption not in existing_content:
+                # Fusion : ajoute le nouveau texte a la suite de l'existant
+                # plutot que de l'ecraser (cas festivals multi-posts sur le
+                # meme evenement).
                 merged_content = f'{existing_content}<br/>{new_content}' if existing_content else new_content
-            else:
+            elif is_same_event:
                 merged_content = existing_content or new_content
+            else:
+                # Conteneur reutilise pour un evenement different: remplace
+                # entierement l'ancien texte, ne le fusionne pas.
+                merged_content = new_content
             await client.call_tool(
                 "cms_update_event_paragraph",
                 {"id": event_id, "paragraph_id": text_paragraphs[0]["id"], "content": merged_content},
@@ -315,16 +337,24 @@ async def publish_one_async(client, record: dict) -> dict:
                 "cms_create_event_paragraph", {"id": event_id, "type": "text", "content": new_content}
             )
 
-        # Multi-images : si cette source apporte une nouvelle image (differente
-        # du thumbnail principal deja utilise), l'ajoute comme photo
-        # supplementaire plutot que de l'ignorer (cas festivals multi-artistes).
+        # Multi-images : si le MEME evenement recoit une nouvelle image
+        # (autre artiste/source), l'ajoute en plus. Si c'est un conteneur
+        # reutilise pour un evenement different, supprime d'abord les
+        # anciennes photos (anciens flyers sans rapport) avant d'ajouter
+        # la nouvelle.
+        existing_photos = [p for p in paragraphs.get("items", []) if p.get("type") == "photo"]
+        if not is_same_event and existing_photos:
+            for photo in existing_photos:
+                await client.call_tool(
+                    "cms_delete_event_paragraph", {"id": event_id, "paragraph_id": photo["id"]}
+                )
+            existing_photos = []
         if image_url:
-            existing_photos = [p for p in paragraphs.get("items", []) if p.get("type") == "photo"]
             already_present = any(image_url in (p.get("originalThumbnail") or "") for p in existing_photos)
             if not already_present and len(existing_photos) < 8:
                 await client.call_tool(
                     "cms_create_event_paragraph",
-                    {"id": event_id, "type": "photo", "originalThumbnail": image_url, "isThumbnail": False},
+                    {"id": event_id, "type": "photo", "originalThumbnail": image_url, "isThumbnail": True},
                 )
 
         result = {"status": "UPDATED", "goodbarber_id": event_id, "message": f"Evenement mis a jour (id {event_id})."}
