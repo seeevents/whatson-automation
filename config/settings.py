@@ -96,6 +96,10 @@ AIRTABLE_TABLE_DEDUP = "tblITBraE4pexB4Cy"
 FLD_DEDUP_DATE = "fldnUzBaDpTg0RVa8"
 FLD_DEDUP_URL = "fldvz9Jhk6sQwn3mK"
 
+# --- Supabase (V2) - publication en parallele de GoodBarber (secrets GitHub Actions) ---
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip()
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+
 # --- Traitement par lot ---
 MAX_RECORDS_PER_RUN = 2000  # marge large sous la limite de temps GitHub Actions (6h)
 
