@@ -18,11 +18,15 @@ Regles :
 Acces : API REST Supabase (PostgREST) via `requests`, avec la cle secrete
 (qui contourne le RLS) - meme cle utilisable plus tard pour Supabase Storage.
 
-TODO (traite separement) : image_url est l'URL Instagram BRUTE, qui expire
-au bout de quelques jours. Reheberger l'image dans Supabase Storage.
+Images : l'image Instagram (URL qui expire en quelques jours) est telechargee
+et rangee dans le bucket PUBLIC "event-images" de Supabase Storage ; c'est
+l'URL permanente qui est enregistree dans events.image_url. Si le reheberge
+echoue (bucket absent, image trop lourde...), on garde l'URL brute et le
+message V2 le signale ("image non rehebergee") - la publication continue.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import time
@@ -39,6 +43,12 @@ logger = logging.getLogger("whatson.publication_supabase")
 TIMEOUT = 20
 MAX_RETRIES = 3
 RETRY_BACKOFF_SECONDS = 2
+
+# Reheberge des images (Supabase Storage) : bucket PUBLIC a creer cote Supabase.
+IMAGE_BUCKET = "event-images"
+IMAGE_MAX_BYTES = 5 * 1024 * 1024
+IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+IMAGE_USER_AGENT = "Mozilla/5.0 (compatible; SEEEventsBot/1.0)"
 
 DEFAULT_HOUR_BALI = 20          # meme defaut que GoodBarber quand aucune heure n'est connue
 DATE_WINDOW_DAYS = 2            # meme fenetre que la fusion GoodBarber (+/- 2 jours)
@@ -141,6 +151,67 @@ def _parse_ts(value: str) -> datetime:
 
 
 # --------------------------------------------------------------------------
+# Reheberge des images (Supabase Storage)
+# --------------------------------------------------------------------------
+
+def _image_target(image_url: str) -> tuple[str, str]:
+    """
+    (chemin dans le bucket, URL publique permanente) pour une image source.
+    Le chemin ne depend que de l'URL SANS ses parametres (les parametres
+    Instagram changent, le fichier non) : la meme image donne toujours le
+    meme fichier, donc un re-run n'en cree jamais un second.
+    """
+    stable = image_url.split("?", 1)[0]
+    ext_match = re.search(r"\.(jpg|jpeg|png|webp|gif)$", stable, re.IGNORECASE)
+    ext = ext_match.group(1).lower() if ext_match else "jpg"
+    path = f"{hashlib.sha256(stable.encode()).hexdigest()[:40]}.{ext}"
+    public_url = f"{settings.SUPABASE_URL.rstrip('/')}/storage/v1/object/public/{IMAGE_BUCKET}/{path}"
+    return path, public_url
+
+
+def _rehost_image(image_url: str) -> tuple[str, str]:
+    """
+    Telecharge l'image Instagram et la range dans Supabase Storage.
+    Retourne (url_a_enregistrer, note). Succes : (URL publique permanente, "").
+    Echec (best-effort, ne leve jamais) : (URL brute d'origine, raison courte)
+    - l'URL brute expirera en quelques jours, la note previent l'equipe.
+    """
+    path, public_url = _image_target(image_url)
+    try:
+        resp = requests.get(
+            image_url, timeout=TIMEOUT, stream=True, headers={"User-Agent": IMAGE_USER_AGENT}
+        )
+        if not resp.ok:
+            return image_url, f"image non rehebergee (telechargement HTTP {resp.status_code})"
+        content_type = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if content_type not in IMAGE_CONTENT_TYPES:
+            return image_url, f"image non rehebergee (type {content_type or 'inconnu'} non supporte)"
+        data = bytearray()
+        for chunk in resp.iter_content(64 * 1024):
+            data.extend(chunk)
+            if len(data) > IMAGE_MAX_BYTES:
+                return image_url, "image non rehebergee (fichier trop volumineux)"
+        resp.close()
+
+        upload = requests.request(
+            "POST",
+            f"{settings.SUPABASE_URL.rstrip('/')}/storage/v1/object/{IMAGE_BUCKET}/{path}",
+            headers=_headers({"Content-Type": content_type, "x-upsert": "true",
+                              "Cache-Control": "max-age=31536000"}),
+            data=bytes(data),
+            timeout=TIMEOUT,
+        )
+        if not upload.ok:
+            return image_url, f"image non rehebergee (stockage refuse HTTP {upload.status_code}: {upload.text[:150]})"
+        return public_url, ""
+    except requests.RequestException as exc:
+        return image_url, f"image non rehebergee ({type(exc).__name__})"
+    except Exception as exc:  # noqa: BLE001 - best-effort : une image ne doit jamais bloquer la publication
+        logger.exception("Echec inattendu reheberge image")
+        return image_url, f"image non rehebergee ({type(exc).__name__})"
+
+
+# --------------------------------------------------------------------------
 # Recherche venue / event
 # --------------------------------------------------------------------------
 
@@ -223,6 +294,10 @@ def _result(status: str, message: str, event_id: str | None = None) -> dict:
     return {"status": status, "event_id": event_id, "message": f"V2: {message}"}
 
 
+def _note(image_note: str) -> str:
+    return f" ATTENTION: {image_note}." if image_note else ""
+
+
 def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
     global _not_configured_logged
     if not _is_configured():
@@ -274,20 +349,28 @@ def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
             payload["description"] = caption
         elif caption and caption not in current_desc:
             payload["description"] = f"{current_desc}\n\n{caption}"
-        if image_url and image_url != existing.get("image_url"):
-            payload["image_url"] = image_url
+        image_note = ""
+        if image_url:
+            existing_image = existing.get("image_url")
+            if existing_image != _image_target(image_url)[1]:  # pas deja reheberge
+                new_image, image_note = _rehost_image(image_url)
+                # Si le reheberge echoue et qu'une image existe deja, on la garde
+                # plutot que de la remplacer par une URL Instagram qui va expirer.
+                if not (image_note and existing_image):
+                    payload["image_url"] = new_image
         if payload:
             _request("PATCH", "events", params={"id_event": f"eq.{existing['id_event']}"},
                      json_body=payload, prefer="return=minimal")
-        return _result("updated", f"event mis a jour (id {existing['id_event']}).", existing["id_event"])
+        return _result("updated", f"event mis a jour (id {existing['id_event']}).{_note(image_note)}", existing["id_event"])
 
     event_id = str(uuid.uuid4())
+    stored_image, image_note = _rehost_image(image_url) if image_url else ("", "")
     row = {
         "id_event": event_id,
         "id_venue": venue["id_venue"],
         "title": titre,
         "date_time": start_utc.isoformat(),
-        "image_url": image_url or None,
+        "image_url": stored_image or None,
         "market": venue.get("market"),
         "description": caption or None,
         "event_instagram_url": f"https://www.instagram.com/{handle}/" if handle else None,
@@ -297,7 +380,7 @@ def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     _request("POST", "events", json_body=row, prefer="return=minimal")
-    return _result("created", f"event cree (id {event_id}).", event_id)
+    return _result("created", f"event cree (id {event_id}).{_note(image_note)}", event_id)
 
 
 def publish_to_supabase(record: dict, event_time: tuple[int, int] | None = None) -> dict:
