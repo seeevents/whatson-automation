@@ -1,0 +1,31 @@
+name: WhatsOn - Test Publication V2 Supabase (sans GoodBarber)
+
+on:
+  workflow_dispatch:
+    inputs:
+      record_id:
+        description: "ID Airtable a tester (rec...), n'importe quel statut"
+        required: true
+        type: string
+
+jobs:
+  test-publication-supabase:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dependances
+        run: pip install -r requirements.txt
+
+      - name: Tester la publication V2 (Supabase uniquement)
+        env:
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RECORD_ID: ${{ inputs.record_id }}
+        run: python scripts/test_publication_supabase.py "$RECORD_ID"
