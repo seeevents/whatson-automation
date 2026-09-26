@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 
 from config import settings
-from src import airtable_client, claude_client, geocoding, goodbarber_mcp_client, msgraph_client
+from src import airtable_client, claude_client, geocoding, goodbarber_mcp_client, msgraph_client, publication_supabase
 from src.publication import _report_to_client_and_tracking
 
 logger = logging.getLogger("whatson.publication_direct")
@@ -357,7 +357,10 @@ async def publish_one_async(client, record: dict) -> dict:
                     {"id": event_id, "type": "photo", "originalThumbnail": image_url, "isThumbnail": True},
                 )
 
-        result = {"status": "UPDATED", "goodbarber_id": event_id, "message": f"Evenement mis a jour (id {event_id})."}
+        result = {
+            "status": "UPDATED", "goodbarber_id": event_id,
+            "message": f"Evenement mis a jour (id {event_id}).", "event_time": event_time,
+        }
         _report_to_client_and_tracking(record, result["status"], result["message"], event_id)
         return result
 
@@ -393,7 +396,7 @@ async def publish_one_async(client, record: dict) -> dict:
 
         base_message = f"Nouvel evenement cree (id {event_id})."
         message = f"{base_message} {doublon_note}".strip() if doublon_note else base_message
-        result = {"status": "CREATED", "goodbarber_id": event_id, "message": message}
+        result = {"status": "CREATED", "goodbarber_id": event_id, "message": message, "event_time": event_time}
         _report_to_client_and_tracking(record, result["status"], result["message"], event_id)
         return result
 
@@ -402,6 +405,7 @@ async def _run_all_async(client, records: list[dict]) -> dict[str, int]:
     """Traite tous les enregistrements SEQUENTIELLEMENT dans une seule
     session MCP (evite le cout de reconnexion ~5-10s par enregistrement)."""
     summary: dict[str, int] = {}
+    supabase_summary: dict[str, int] = {}
     total = len(records)
     for i, record in enumerate(records, start=1):
         record_id = record["id"]
@@ -409,6 +413,14 @@ async def _run_all_async(client, records: list[dict]) -> dict[str, int]:
             result = await publish_one_async(client, record)
             status = result["status"]
             fields = {settings.FLD_ALERTE: result["message"]}
+            # Publication V2 (Supabase) en parallele de GoodBarber : uniquement
+            # si GoodBarber a reussi, et sans JAMAIS le perturber (le module
+            # absorbe toute erreur). Le resultat V2 est ajoute au champ Alerte
+            # (ex: "V2: venue ... introuvable") pour que l'equipe le voie.
+            if status in ("CREATED", "UPDATED"):
+                v2 = publication_supabase.publish_to_supabase(record, result.get("event_time"))
+                supabase_summary[v2["status"]] = supabase_summary.get(v2["status"], 0) + 1
+                fields[settings.FLD_ALERTE] = f'{result["message"]} | {v2["message"]}'
             if status == "ERROR":
                 fields[settings.FLD_STATUT] = settings.STATUT_VALIDE
             else:
@@ -432,6 +444,8 @@ async def _run_all_async(client, records: list[dict]) -> dict[str, int]:
         if i % 10 == 0 or i == total:
             logger.info("Progression: %d/%d traitees (%s)", i, total, summary)
 
+    if supabase_summary:
+        logger.info("Publication V2 (Supabase): %s", supabase_summary)
     return summary
 
 
