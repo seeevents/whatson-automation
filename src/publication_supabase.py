@@ -37,6 +37,7 @@ from difflib import SequenceMatcher
 import requests
 
 from config import settings
+from src import claude_client
 
 logger = logging.getLogger("whatson.publication_supabase")
 
@@ -57,9 +58,43 @@ VENUE_NAME_SIMILARITY_MIN = 0.85
 VENUE_NAME_MARGIN = 0.05        # ecart minimum entre le meilleur et le 2e candidat (sinon ambigu)
 
 VENUE_COLUMNS = "id_venue,name,instagram_url,market,latitude,longitude"
-EVENT_COLUMNS = "id_event,title,date_time,description,image_url,source_type"
+EVENT_COLUMNS = "id_event,title,date_time,end_date_time,categories,description,image_url,source_type"
+
+# Event.categories is a jsonb list (an event can be e.g. DJ + Top event at
+# once) - the pipeline only ever auto-fills the type tag below, it never
+# adds "top_event" itself (that's an editorial pick, made by hand in the
+# back-office). Taxonomy matches core/models.py EventCategory, NOT
+# GoodBarber's CAT_TYPES in publication_direct.py (V1 has "Dance", V2 has
+# "live_band" instead), so this gets its own classifier.
+EVENT_CATEGORIES = {"dj", "live_band", "food", "art", "kids", "wellness", "sport", "other"}
+
+EVENT_CATEGORY_SYSTEM_PROMPT = (
+    "Tu classes un evenement dans UNE categorie parmi : dj, live_band, food, art, kids, wellness, sport, other. "
+    "Choisis dj si un DJ ou de la musique electronique est mentionne. Choisis live_band si un groupe ou "
+    "musicien live (non-DJ) est mentionne. Choisis other si aucune categorie ne correspond clairement. "
+    'Reponds avec UNIQUEMENT un objet JSON, format : {"category": "dj|live_band|food|art|kids|wellness|sport|other"}'
+)
 
 _not_configured_logged = False
+
+
+def _classify_event_category(titre: str, caption: str) -> str:
+    """Meme principe que _classify_type_category de publication_direct.py
+    (petit appel Claude isole, pas d'outils MCP) mais avec la taxonomie de
+    l'Event.category cote V2/back-office. Ne leve jamais - retombe sur
+    "other" sur n'importe quel echec, comme le reste de ce module."""
+    try:
+        response = claude_client.call_claude(
+            EVENT_CATEGORY_SYSTEM_PROMPT,
+            f"Titre: {titre}\nTexte: {caption}",
+            max_tokens=100,
+        )
+        result = claude_client.extract_json_from_response(response)
+        category = str(result.get("category", "")).strip().lower()
+        return category if category in EVENT_CATEGORIES else "other"
+    except claude_client.ClaudeError as exc:
+        logger.warning("Echec classification categorie V2 pour '%s': %s", titre, exc)
+        return "other"
 
 
 class SupabaseError(Exception):
@@ -328,6 +363,9 @@ def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
 
     hour, minute = event_time if event_time else (DEFAULT_HOUR_BALI, 0)
     start_utc = _bali_to_utc(date_str, hour, minute)
+    # Same convention as the GoodBarber (V1) publication: end of the same
+    # day (23:59 Bali time) when no real end date is known.
+    end_utc = _bali_to_utc(date_str, 23, 59)
     existing = _find_existing_event(venue["id_venue"], start_utc, titre)
 
     if existing:
@@ -344,6 +382,15 @@ def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
         if event_time or not same_day:
             if existing_dt != start_utc:
                 payload["date_time"] = start_utc.isoformat()
+        # Only fill end_date_time in if it's not set yet - never override a
+        # value staff may have set by hand in the back-office (e.g. for a
+        # real multi-day event).
+        if not existing.get("end_date_time"):
+            payload["end_date_time"] = end_utc.isoformat()
+        # Same guard as end_date_time: only classify if the event has no
+        # category yet, never override a staff member's manual pick.
+        if not existing.get("categories"):
+            payload["categories"] = [_classify_event_category(titre, caption)]
         current_desc = existing.get("description") or ""
         if caption and not current_desc:
             payload["description"] = caption
@@ -370,6 +417,8 @@ def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
         "id_venue": venue["id_venue"],
         "title": titre,
         "date_time": start_utc.isoformat(),
+        "end_date_time": end_utc.isoformat(),
+        "categories": [_classify_event_category(titre, caption)],
         "image_url": stored_image or None,
         "market": venue.get("market"),
         "description": caption or None,
