@@ -57,7 +57,7 @@ VENUE_NAME_SIMILARITY_MIN = 0.85
 VENUE_NAME_MARGIN = 0.05        # ecart minimum entre le meilleur et le 2e candidat (sinon ambigu)
 
 VENUE_COLUMNS = "id_venue,name,instagram_url,market,latitude,longitude"
-EVENT_COLUMNS = "id_event,title,date_time,description,image_url,source_type"
+EVENT_COLUMNS = "id_event,title,date_time,end_date_time,description,image_url,source_type"
 
 _not_configured_logged = False
 
@@ -328,6 +328,9 @@ def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
 
     hour, minute = event_time if event_time else (DEFAULT_HOUR_BALI, 0)
     start_utc = _bali_to_utc(date_str, hour, minute)
+    # Same convention as the GoodBarber (V1) publication: end of the same
+    # day (23:59 Bali time) when no real end date is known.
+    end_utc = _bali_to_utc(date_str, 23, 59)
     existing = _find_existing_event(venue["id_venue"], start_utc, titre)
 
     if existing:
@@ -344,6 +347,11 @@ def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
         if event_time or not same_day:
             if existing_dt != start_utc:
                 payload["date_time"] = start_utc.isoformat()
+        # Only fill end_date_time in if it's not set yet - never override a
+        # value staff may have set by hand in the back-office (e.g. for a
+        # real multi-day event).
+        if not existing.get("end_date_time"):
+            payload["end_date_time"] = end_utc.isoformat()
         current_desc = existing.get("description") or ""
         if caption and not current_desc:
             payload["description"] = caption
@@ -370,6 +378,7 @@ def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
         "id_venue": venue["id_venue"],
         "title": titre,
         "date_time": start_utc.isoformat(),
+        "end_date_time": end_utc.isoformat(),
         "image_url": stored_image or None,
         "market": venue.get("market"),
         "description": caption or None,
