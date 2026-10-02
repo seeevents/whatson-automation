@@ -58,12 +58,14 @@ VENUE_NAME_SIMILARITY_MIN = 0.85
 VENUE_NAME_MARGIN = 0.05        # ecart minimum entre le meilleur et le 2e candidat (sinon ambigu)
 
 VENUE_COLUMNS = "id_venue,name,instagram_url,market,latitude,longitude"
-EVENT_COLUMNS = "id_event,title,date_time,end_date_time,category,description,image_url,source_type"
+EVENT_COLUMNS = "id_event,title,date_time,end_date_time,categories,description,image_url,source_type"
 
-# Event.category taxonomy (back-office core/models.py EventCategory) - NOT
-# the same list as GoodBarber's CAT_TYPES in publication_direct.py (V1 has
-# "Dance", V2 has "live_band" instead), so this gets its own classifier
-# rather than reusing V1's category id.
+# Event.categories is a jsonb list (an event can be e.g. DJ + Top event at
+# once) - the pipeline only ever auto-fills the type tag below, it never
+# adds "top_event" itself (that's an editorial pick, made by hand in the
+# back-office). Taxonomy matches core/models.py EventCategory, NOT
+# GoodBarber's CAT_TYPES in publication_direct.py (V1 has "Dance", V2 has
+# "live_band" instead), so this gets its own classifier.
 EVENT_CATEGORIES = {"dj", "live_band", "food", "art", "kids", "wellness", "sport", "other"}
 
 EVENT_CATEGORY_SYSTEM_PROMPT = (
@@ -387,8 +389,8 @@ def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
             payload["end_date_time"] = end_utc.isoformat()
         # Same guard as end_date_time: only classify if the event has no
         # category yet, never override a staff member's manual pick.
-        if not existing.get("category"):
-            payload["category"] = _classify_event_category(titre, caption)
+        if not existing.get("categories"):
+            payload["categories"] = [_classify_event_category(titre, caption)]
         current_desc = existing.get("description") or ""
         if caption and not current_desc:
             payload["description"] = caption
@@ -416,7 +418,7 @@ def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
         "title": titre,
         "date_time": start_utc.isoformat(),
         "end_date_time": end_utc.isoformat(),
-        "category": _classify_event_category(titre, caption),
+        "categories": [_classify_event_category(titre, caption)],
         "image_url": stored_image or None,
         "market": venue.get("market"),
         "description": caption or None,
