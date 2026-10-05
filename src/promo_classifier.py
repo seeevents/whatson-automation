@@ -39,6 +39,16 @@ MENU_PROMO_KEYWORDS = [
     r"\btry\s+our\b",
 ]
 
+# "<plat/boisson> <jour de semaine>" (ex: "Ramen Monday", "Taco Tuesday") : tres
+# probablement une promo de menu hebdomadaire recurrente et non un event ponctuel,
+# mais le signal seul n'est pas assez fiable pour un IGNORE automatique en Python -
+# on le traite comme AMBIGU (confidence "low") pour forcer le fallback Claude,
+# sauf si un signal distinctif (DJ/live/lineup) est aussi present.
+THEME_NIGHT_AMBIGUOUS_KEYWORDS = [
+    r"\b\w+\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+    r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+\w+\b",
+]
+
 
 @dataclass
 class PromoClassificationResult:
@@ -64,7 +74,13 @@ def classify_promo(text: str) -> PromoClassificationResult:
     has_distinctive_signal = any(re.search(p, t) for p in DISTINCTIVE_EVENT_KEYWORDS)
     has_menu_signal = any(re.search(p, t) for p in MENU_PROMO_KEYWORDS)
 
+    has_theme_night_signal = any(re.search(p, t) for p in THEME_NIGHT_AMBIGUOUS_KEYWORDS)
+
     if not has_generic_signal and not has_menu_signal:
+        if has_theme_night_signal and not has_distinctive_signal:
+            return PromoClassificationResult(
+                False, "low", "motif 'plat/jour de semaine' detecte (type theme night) - ambigu, fallback recommande"
+            )
         # Aucun signal de pseudo-evenement detecte - probablement un vrai event,
         # mais on ne l'affirme pas ici avec confiance (ce module ne fait QUE la
         # detection de promos generiques, pas la validation positive d'un event)

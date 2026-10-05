@@ -30,6 +30,20 @@ NON_BALI_PLACES = [
     r"\bjakarta\b.*\bevent\b", r"\bitaly\b", r"\beurope\b", r"\bsingapore\b.*\bevent\b",
 ]
 
+# Contenus non-evenementiels frequemment extraits par erreur (annonces
+# communautaires, offres de service) : on ne les classe JAMAIS seul en
+# Python (meme avec une date exploitable) - on force systematiquement le
+# fallback Claude, qui a le contexte pour juger au cas par cas.
+NON_EVENT_SIGNAL_KEYWORDS = [
+    r"\blost\s+(dog|cat|pet)\b", r"\bmissing\s+(dog|cat|pet)\b",
+    r"\b(looking|searching)\s+for\s+a\s+(home|family)\b",
+    r"\bneeds?\s+a\s+(forever\s+)?home\b", r"\bforeign?\s+home\b",
+    r"\bfoster\b", r"\bup\s+for\s+adoption\b", r"\bplease\s+adopt\b",
+    r"\brehome\b", r"\burgent\s+rescue\b",
+    r"\b(hiring|now\s+hiring|job\s+opening|vacancy|we'?re\s+looking\s+for\s+a)\b",
+    r"\b(training|workshop|class(es)?|course|certification)\b(?!.*\b(party|festival|lineup|line-up)\b)",
+]
+
 SYSTEM_PROMPT = """Tu es un agent de tri strict pour les evenements SEE Bali / WhatsOn. Tu traites une seule ligne (un post ou story Instagram deja extrait par un premier passage IA), sans memoire d'aucune autre ligne traitee avant ou apres.
 
 ## TA TACHE
@@ -48,6 +62,8 @@ Decide si cette ligne doit etre classee VALIDE (evenement actionnable, a publier
 - IGNORE si le texte est un post generique sans evenement precis (ex: horaires d'ouverture hebdomadaires sur les 7 jours, promo generale sans date).
 - IGNORE si le contenu ne decrit pas clairement UN evenement (ou une serie d'evenements identifiable, ex: calendrier hebdo/mensuel) avec venue + date + sujet identifiables - un contenu flou, une simple photo d'ambiance sans texte d'evenement, ou une promo generale sans aucun element concret doit etre Ignore.
 - IGNORE si le texte concerne une offre d'emploi ou un post non-evenementiel.
+- IGNORE explicitement les annonces communautaires non-evenementielles : animal perdu/a adopter/recherche de famille d'accueil, offre d'emploi, et les offres de formation/cours/workshop recurrents ou sur inscription (ex: "Raw Vegan Chef Training") qui sont des services proposes par la venue et non un event public ponctuel - sauf si le texte decrit clairement un atelier public unique avec places limitees presente comme un event (dans le doute, IGNORE).
+- IGNORE les promos recurrentes "plat/boisson du jour" meme avec un jour de semaine explicite (ex: "Ramen Monday", "Taco Tuesday") sauf si un DJ/live/line-up specifique y est associe (cf regle exception ci-dessus).
 
 ## CAS AMBIGUS - REGLE CRITIQUE
 Tu dois TOUJOURS trancher, sans jamais attendre de confirmation humaine et sans jamais poser de question. Si le signal temporel ou geographique est faible ou ambigu mais que tu penches pour une decision, prends cette decision quand meme. Dans ce cas uniquement, note tres brievement la raison de l'incertitude dans le champ alert_note (une phrase courte maximum). Si la decision est claire et sans ambiguite, laisse alert_note vide.
@@ -55,6 +71,15 @@ Tu dois TOUJOURS trancher, sans jamais attendre de confirmation humaine et sans 
 ## FORMAT DE REPONSE - STRICT, SANS EXCEPTION
 N'ecris JAMAIS de raisonnement, de brouillon ou de texte explicatif visible avant ou apres le JSON. Reponds UNIQUEMENT avec un objet JSON, rien d'autre. Le premier caractere de ta reponse DOIT etre { et le dernier DOIT etre }. Le champ alert_note doit rester tres court (une phrase maximum) pour ne jamais risquer de tronquer la reponse.
 Format exact : {"status": "Valide" ou "Ignore", "corrected_date": "YYYY-MM-DD si Valide, chaine vide si Ignore", "alert_note": "note courte si signal faible, sinon chaine vide"}"""
+
+
+def _check_non_event_signal(text: str) -> bool:
+    """True si le texte ressemble a un contenu non-evenementiel (annonce
+    communautaire, offre de service/formation, offre d'emploi) plutot
+    qu'a un vrai event ponctuel avec venue - meme s'il contient une date
+    ou un jour de semaine exploitable."""
+    t = text.lower()
+    return any(re.search(p, t) for p in NON_EVENT_SIGNAL_KEYWORDS)
 
 
 def _check_geography(text: str) -> tuple[bool, str]:
@@ -110,6 +135,11 @@ def _try_python_classification(record: dict) -> tuple[bool, str, str]:
     alerte_existing = f.get(settings.FLD_ALERTE, "") or ""
     combined_text = f"{caption} {alerte_existing}"
     today = datetime.now(settings.BALI_TZ).date()
+
+    # Controle 0: contenu non-evenementiel (animal perdu, offre de formation/emploi...)
+    # -> jamais de decision Python seule, meme avec une date exploitable.
+    if _check_non_event_signal(combined_text):
+        return False, "", ""
 
     # Controle 1: calendrier multi-jours ? (3+ jours de semaine differents mentionnes)
     if _count_distinct_weekdays_mentioned(combined_text) >= 3:

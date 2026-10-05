@@ -288,6 +288,20 @@ async def publish_one_async(client, record: dict) -> dict:
             "urlEvent": f"https://www.instagram.com/{instagram}/" if instagram else None,
             "slug": slug,
         }
+        # Backfill adresse/GPS si l'event reutilise n'en a jamais eu (cree avant
+        # l'ajout du geocodage, ou geocodage ayant echoue a l'epoque) - sinon le
+        # bug "coordonnees 0,0 / pas d'adresse" persiste indefiniment sur les
+        # containers reutilises, meme apres plusieurs mises a jour.
+        existing_address = existing.get("address") or ""
+        existing_lat = existing.get("latitude") or 0
+        existing_lng = existing.get("longitude") or 0
+        if not existing_address.strip() or (existing_lat == 0 and existing_lng == 0):
+            geo = geocoding.geocode_venue(venue_name)
+            if geo:
+                update_args["address"] = geo["address"]
+                update_args["latitude"] = geo["latitude"]
+                update_args["longitude"] = geo["longitude"]
+
         update_args = {k: v for k, v in update_args.items() if v is not None}
         await client.call_tool("cms_update_event", update_args)
 
