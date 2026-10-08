@@ -1,0 +1,24 @@
+name: WhatsOn - Google Events (hebdo)
+
+on:
+  workflow_dispatch: {}
+  # A declencher 1x/semaine via cron-job.org (ex: lundi 11:00 Bali, avant le
+  # Tri de 13:00 pour que les events passent par le Tri du jour).
+
+jobs:
+  google-events:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Installer les dependances
+        run: pip install -r requirements.txt
+      - name: Lancer le passage Google Events
+        env:
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+        run: python scripts/run_google_events.py
