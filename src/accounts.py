@@ -43,13 +43,15 @@ def _extract_url_from_hyperlink_formula(formula: str) -> str:
     return url.split("?")[0]
 
 
-def get_todays_accounts(batch_number: str | None = None) -> list[Account]:
+def get_todays_accounts(batch_number: str | None = None, all_weekdays: bool = False) -> list[Account]:
     """
     Retourne la liste des comptes a traiter aujourd'hui.
     Si batch_number est fourni ("1" a "8"), ne retourne que les comptes de
     CE batch (reproduit le decoupage Make pour permettre l'execution
     parallele des 8 batches). Si None, retourne TOUS les comptes du jour
     tous batches confondus (mode sequentiel complet).
+    all_weekdays=True ignore la colonne F (jour de la semaine) : tous les
+    comptes actifs, utilise par le passage hebdo des posts epingles.
     """
     values, formulas = msgraph_client.get_instacheck_data()
     if not values:
@@ -72,7 +74,7 @@ def get_todays_accounts(batch_number: str | None = None) -> list[Account]:
 
         if "Claude" not in model:
             continue
-        if weekday not in ("Everyday", today_weekday):
+        if not all_weekdays and weekday not in ("Everyday", today_weekday):
             continue
         if row_batch_number not in ("1", "2", "3", "4", "5", "6", "7", "8"):
             continue

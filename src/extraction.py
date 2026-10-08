@@ -226,3 +226,16 @@ def process_account(account: accounts.Account) -> None:
     stories = apify_client.scrape_stories(username)
     for story in stories:
         process_story(account, story)
+
+
+def process_account_pinned(account: accounts.Account) -> None:
+    """Passage hebdo : uniquement les posts EPINGLES (souvent anciens, donc rates
+    par le filtre '2 days' du scrape quotidien). Pas de stories. Le dedup
+    (Instagram_Items_Vus) evite de retraiter un post deja vu ; le Tri ecarte
+    ensuite les events dont la date est passee."""
+    logger.info("Passage epingles: %s (%s)", account.venue_name, account.instagram_url)
+    posts = apify_client.scrape_posts(account.instagram_url, limit=4, newer_than=None)
+    pinned = [p for p in posts if p.get("isPinned")]
+    logger.info("%s: %d post(s) epingle(s) sur %d", account.venue_name, len(pinned), len(posts))
+    for post in pinned:
+        process_post(account, post)
