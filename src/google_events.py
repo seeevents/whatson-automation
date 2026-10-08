@@ -73,6 +73,7 @@ def run() -> dict[str, int]:
             "language": "en",
             "maxResults": MAX_RESULTS,
         },
+        timeout=600,
     )
     stats = {"fetched": len(items), "noise": 0, "dup_run": 0, "dup_existing": 0, "created": 0}
 

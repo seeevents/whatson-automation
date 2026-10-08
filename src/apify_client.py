@@ -22,14 +22,14 @@ class ApifyError(Exception):
     """Erreur lors d'un appel a l'API Apify."""
 
 
-def _run_sync_get_dataset_items(actor_id: str, input_body: dict[str, Any]) -> list[dict[str, Any]]:
+def _run_sync_get_dataset_items(actor_id: str, input_body: dict[str, Any], timeout: int = TIMEOUT) -> list[dict[str, Any]]:
     if not settings.APIFY_API_TOKEN:
         raise ApifyError("APIFY_API_TOKEN manquant dans l'environnement.")
 
-    url = f"{BASE_URL}/acts/{actor_id}/run-sync-get-dataset-items"
+    url = f"{BASE_URL}/acts/{actor_id.replace('/', '~')}/run-sync-get-dataset-items"
     params = {"token": settings.APIFY_API_TOKEN}
     try:
-        resp = requests.post(url, params=params, json=input_body, timeout=TIMEOUT)
+        resp = requests.post(url, params=params, json=input_body, timeout=timeout)
         if not resp.ok:
             raise ApifyError(f"{resp.status_code} {resp.reason}: {resp.text[:500]}")
         return resp.json()
