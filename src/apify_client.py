@@ -37,7 +37,7 @@ def _run_sync_get_dataset_items(actor_id: str, input_body: dict[str, Any], timeo
         raise ApifyError(f"Erreur reseau: {exc}") from exc
 
 
-def scrape_posts(instagram_url: str, limit: int = 6) -> list[dict[str, Any]]:
+def scrape_posts(instagram_url: str, limit: int = 6, newer_than: str | None = "2 days") -> list[dict[str, Any]]:
     """Scrape les derniers posts d'un compte Instagram.
     onlyPostsNewerThan='2 days' : evite de re-payer/re-telecharger des posts
     deja vus lors des scrapes precedents (le scraping tourne quotidiennement,
@@ -47,9 +47,10 @@ def scrape_posts(instagram_url: str, limit: int = 6) -> list[dict[str, Any]]:
         "directUrls": [instagram_url],
         "resultsType": "posts",
         "resultsLimit": limit,
-        "onlyPostsNewerThan": "2 days",
         "addParentData": False,
     }
+    if newer_than:
+        input_body["onlyPostsNewerThan"] = newer_than
     try:
         items = _run_sync_get_dataset_items(settings.APIFY_ACTOR_POSTS, input_body)
     except ApifyError as exc:
