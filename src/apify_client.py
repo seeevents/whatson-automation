@@ -18,6 +18,9 @@ BASE_URL = "https://api.apify.com/v2"
 TIMEOUT = 120
 
 
+STATS = {"calls": 0, "errors": 0, "items": 0, "last_error": ""}
+
+
 class ApifyError(Exception):
     """Erreur lors d'un appel a l'API Apify."""
 
@@ -51,11 +54,15 @@ def scrape_posts(instagram_url: str, limit: int = 6, newer_than: str | None = "2
     }
     if newer_than:
         input_body["onlyPostsNewerThan"] = newer_than
+    STATS["calls"] += 1
     try:
         items = _run_sync_get_dataset_items(settings.APIFY_ACTOR_POSTS, input_body)
     except ApifyError as exc:
+        STATS["errors"] += 1
+        STATS["last_error"] = str(exc)[:300]
         logger.error("Echec scraping posts pour %s: %s", instagram_url, exc)
         return []
+    STATS["items"] += len(items)
     logger.info("Posts scrapes pour %s: %d item(s)", instagram_url, len(items))
     return items
 

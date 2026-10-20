@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config.settings import validate_config
-from src import accounts, extraction
+from src import accounts, apify_client, extraction
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,6 +49,12 @@ def main() -> int:
 
     elapsed = time.time() - start
     logger.info("Batch termine en %.0fs: %d/%d comptes OK, %d erreur(s)", elapsed, total - errors, total, errors)
+    st = apify_client.STATS
+    # Annotations GitHub : visibles via l'API/UI meme sans lire les logs
+    print(f"::notice::batch {batch_number}: {total} comptes, scrapes={st['calls']}, erreurs_apify={st['errors']}, posts_recus={st['items']}, erreurs_compte={errors}")
+    if st["calls"] and st["errors"] > st["calls"] * 0.2:
+        print(f"::error::batch {batch_number}: {st['errors']}/{st['calls']} scrapes Apify en erreur. Derniere: {st['last_error']}")
+        return 1
     return 0
 
 
