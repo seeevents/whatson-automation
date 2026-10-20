@@ -61,6 +61,26 @@ def graph():
     return f"{len(accs)} comptes InstaCheck"
 
 
+def airtable_write():
+    h = {"Authorization": f"Bearer {os.environ.get('AIRTABLE_API_KEY','')}", "Content-Type": "application/json"}
+    url = f"https://api.airtable.com/v0/{settings.AIRTABLE_BASE_ID}/{settings.AIRTABLE_TABLE_EVENTS}"
+    r = requests.post(url, headers=h, json={"fields": {settings.FLD_TITRE: "DIAG - a supprimer"}}, timeout=30)
+    res = f"create {r.status_code} {r.text[:250]}"
+    if r.ok:
+        rid = r.json()["id"]
+        d = requests.delete(f"{url}/{rid}", headers=h, timeout=30)
+        res += f" | delete {d.status_code}"
+    return res
+
+
+def end_to_end():
+    from src import apify_client
+    posts = apify_client.scrape_posts("https://www.instagram.com/hardrockcafebali/")
+    return f"scrape_posts hardrockcafebali: {len(posts)} item(s)"
+
+
+check("airtable_write", airtable_write)
+check("scrape_via_pipeline_code", end_to_end)
 check("airtable_items_vus", airtable_read)
 check("airtable_events_collectes", airtable_events_count)
 check("apify", apify)
