@@ -63,19 +63,23 @@ def _write_event(
     fallback_date_source: str,
 ) -> None:
     final_date = date if date else fallback_date_source
-    airtable_client.create_record(
-        settings.AIRTABLE_TABLE_EVENTS,
-        {
-            settings.FLD_VENUE_NAME: venue_name,
-            settings.FLD_STATUT: settings.STATUT_A_VALIDER,
-            settings.FLD_IMAGE_URL: image_url,
-            settings.FLD_TITRE: titre,
-            settings.FLD_ALERTE: alerte,
-            settings.FLD_INSTAGRAM: instagram_username,
-            settings.FLD_DATE: final_date,
-            settings.FLD_LEGENDE: caption_or_raw,
-        },
-    )
+    fields = {
+        settings.FLD_VENUE_NAME: venue_name,
+        settings.FLD_STATUT: settings.STATUT_A_VALIDER,
+        settings.FLD_IMAGE_URL: image_url,
+        settings.FLD_TITRE: titre,
+        settings.FLD_ALERTE: alerte,
+        settings.FLD_INSTAGRAM: instagram_username,
+        settings.FLD_LEGENDE: caption_or_raw,
+    }
+    # Airtable (20 oct 2026) rejette desormais une date vide ("") avec un 422
+    # "Cannot parse date value" : on omet le champ plutot que d'envoyer "".
+    # Meme precaution pour l'URL image (champ de type url).
+    if final_date:
+        fields[settings.FLD_DATE] = final_date
+    if not image_url:
+        fields.pop(settings.FLD_IMAGE_URL)
+    airtable_client.create_record(settings.AIRTABLE_TABLE_EVENTS, fields)
 
 
 def process_post(account: accounts.Account, post: dict) -> None:
