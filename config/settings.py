@@ -101,6 +101,10 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip()
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 
 # --- Traitement par lot ---
+# GoodBarber (V1) a ete arrete : par defaut la Publication ecrit UNIQUEMENT dans la V2
+# (Supabase). Mettre GOODBARBER_ENABLED=true pour reactiver la publication V1 en plus.
+GOODBARBER_ENABLED = os.environ.get("GOODBARBER_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+
 MAX_RECORDS_PER_RUN = 2000  # marge large sous la limite de temps GitHub Actions (6h)
 
 
