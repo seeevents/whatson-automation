@@ -485,6 +485,63 @@ def _fetch_records_to_process(dry_run_record_ids: list[str] | None) -> list[dict
     )
 
 
+def _run_v2_only(dry_run_record_ids: list[str] | None = None) -> dict[str, int]:
+    """
+    Publication V2 seule (GoodBarber arrete) : aucune session MCP, donc plus
+    aucune dependance a GoodBarber. Les lignes dont la venue est introuvable /
+    ambigue dans le back-office restent 'Validé' (reprises automatiquement a
+    chaque run, des que l'equipe cree la venue) tant que l'event n'est pas
+    passe ; ensuite elles passent en 'Rapporté'.
+    """
+    records = _fetch_records_to_process(dry_run_record_ids)
+    logger.info("Publication V2 seule: %d ligne(s) a traiter", len(records))
+    today = datetime.now(settings.BALI_TZ).date().isoformat()
+    summary: dict[str, int] = {}
+    v2_summary: dict[str, int] = {}
+
+    for record in records:
+        record_id = record["id"]
+        f = record["fields"]
+        date_str = f.get(settings.FLD_DATE, "") or ""
+        try:
+            event_time = _extract_event_time(f.get(settings.FLD_LEGENDE, "") or "")
+            v2 = publication_supabase.publish_to_supabase(record, event_time)
+            v2_status = v2["status"]
+            v2_summary[v2_status] = v2_summary.get(v2_status, 0) + 1
+
+            if v2_status in ("created", "updated"):
+                _report_to_client_and_tracking(
+                    record, "CREATED" if v2_status == "created" else "UPDATED", v2["message"], ""
+                )
+                new_status = settings.STATUT_RAPPORTE
+            elif v2_status in ("skipped_manual_exists", "skipped_invalid"):
+                new_status = settings.STATUT_RAPPORTE
+            elif v2_status in ("skipped_no_venue", "skipped_ambiguous_venue"):
+                # En attente de la creation / correction de la venue dans le back-office
+                new_status = settings.STATUT_VALIDE if (date_str and date_str >= today) else settings.STATUT_RAPPORTE
+            else:  # skipped_not_configured, error -> on reessaiera au prochain run
+                new_status = settings.STATUT_VALIDE
+            airtable_client.update_record(
+                settings.AIRTABLE_TABLE_EVENTS, record_id,
+                {settings.FLD_STATUT: new_status, settings.FLD_ALERTE: v2["message"]},
+            )
+        except Exception as exc:
+            logger.exception("Echec publication V2 pour %s - reste 'Validé'", record_id)
+            new_status = settings.STATUT_VALIDE
+            try:
+                airtable_client.update_record(
+                    settings.AIRTABLE_TABLE_EVENTS, record_id,
+                    {settings.FLD_ALERTE: f"ECHEC AUTOMATIQUE (Publication V2) : {exc}. Sera reessaye au prochain run."},
+                )
+            except Exception:
+                logger.exception("Impossible d'ecrire l'alerte pour %s", record_id)
+        summary[new_status] = summary.get(new_status, 0) + 1
+
+    logger.info("Publication V2 seule terminee: %s | detail V2: %s", summary, v2_summary)
+    print(f"::notice::Publication V2: {v2_summary}")
+    return summary
+
+
 def run(dry_run_record_ids: list[str] | None = None, max_session_retries: int = 3) -> dict[str, int]:
     """
     Publie toutes les lignes 'Validé' actuelles via le client MCP direct
@@ -498,6 +555,9 @@ def run(dry_run_record_ids: list[str] | None = None, max_session_retries: int = 
     ouvre une NOUVELLE session et on reprend sur ce qui reste encore
     'Validé', plutot que de perdre tout le travail deja accompli.
     """
+    if not settings.GOODBARBER_ENABLED:
+        return _run_v2_only(dry_run_record_ids)
+
     combined_summary: dict[str, int] = {}
     total_seen = 0
 
