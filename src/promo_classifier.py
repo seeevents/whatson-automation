@@ -33,10 +33,17 @@ DISTINCTIVE_EVENT_KEYWORDS = [
 
 # Mots-cles indiquant une promo de menu/plat specifique (pas un event)
 MENU_PROMO_KEYWORDS = [
-    r"\bidr\s*[\d,.]+k?\b",  # prix en roupies indonesiennes
     r"\bnew\s+on\s+the\s+menu\b",
     r"\bsignature\s+(dish|cocktail)\b",
     r"\btry\s+our\b",
+]
+
+# Un prix en roupies seul (ex: "IDR 850K", billet ou set menu) n'est PAS une preuve de
+# promo de menu : les events a billets / diners de gala (NYE, Noel...) en contiennent
+# aussi. Signal ambigu -> fallback Claude, jamais un IGNORE automatique.
+PRICE_AMBIGUOUS_KEYWORDS = [
+    r"\bidr\s*[\d,.]+\s*k?\b",
+    r"\brp\.?\s*[\d,.]+\s*k?\b",
 ]
 
 # "<plat/boisson> <jour de semaine>" (ex: "Ramen Monday", "Taco Tuesday") : tres
@@ -75,8 +82,13 @@ def classify_promo(text: str) -> PromoClassificationResult:
     has_menu_signal = any(re.search(p, t) for p in MENU_PROMO_KEYWORDS)
 
     has_theme_night_signal = any(re.search(p, t) for p in THEME_NIGHT_AMBIGUOUS_KEYWORDS)
+    has_price_signal = any(re.search(p, t) for p in PRICE_AMBIGUOUS_KEYWORDS)
 
     if not has_generic_signal and not has_menu_signal:
+        if has_price_signal and not has_distinctive_signal:
+            return PromoClassificationResult(
+                False, "low", "prix en roupies detecte (billet/set menu ?) - ambigu, fallback recommande"
+            )
         if has_theme_night_signal and not has_distinctive_signal:
             return PromoClassificationResult(
                 False, "low", "motif 'plat/jour de semaine' detecte (type theme night) - ambigu, fallback recommande"
