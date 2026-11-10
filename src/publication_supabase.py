@@ -333,6 +333,18 @@ def _note(image_note: str) -> str:
     return f" ATTENTION: {image_note}." if image_note else ""
 
 
+def _fallback_title(caption: str, venue_name: str) -> str:
+    """Titre de secours quand l'extraction n'en a pas fourni (ex: post sans titre
+    clair) : premiere phrase/ligne de la legende, sinon 'Event at <venue>'."""
+    text = re.sub(r"https?://\S+|[@#]\S+", " ", caption or "")
+    for line in text.splitlines():
+        line = re.sub(r"\s+", " ", line).strip(" -–—•.:,!?\u200b")
+        if len(line) >= 4:
+            first = re.split(r"(?<=[.!?])\s", line, maxsplit=1)[0].strip(" .!?")
+            return (first or line)[:90]
+    return f"Event at {venue_name}".strip() if venue_name else ""
+
+
 def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
     global _not_configured_logged
     if not _is_configured():
@@ -349,6 +361,8 @@ def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
     caption = f.get(settings.FLD_LEGENDE, "") or ""
     image_url = f.get(settings.FLD_IMAGE_URL, "") or ""
 
+    if not titre and date_str:
+        titre = _fallback_title(caption, venue_name)
     if not titre or not date_str:
         return _result("skipped_invalid", "titre ou date manquant, publication V2 ignoree.")
 
