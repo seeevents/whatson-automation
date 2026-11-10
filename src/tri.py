@@ -51,6 +51,8 @@ Decide si cette ligne doit etre classee VALIDE (evenement actionnable, a publier
 
 ## REGLES DE DECISION
 - VALIDE si un jour de la semaine explicite est mentionne dans le texte (ex: 'EVERY MONDAY', 'this Saturday', 'MERCREDI'), meme sans date exacte -> calcule mentalement la prochaine occurrence de ce jour a partir de la date d'aujourd'hui fournie, et renvoie cette date corrigee.
+- VALIDE si le texte annonce une fete connue sans date ecrite (New Year's Eve/NYE = 31 decembre, Christmas Eve = 24 decembre, Christmas Day = 25 decembre, Halloween = 31 octobre...) : utilise la prochaine occurrence a partir d'aujourd'hui comme date corrigee.
+- VALIDE les evenements de fete ou gala (NYE, Noel, Saint-Valentin...) meme avec dîner a menu fixe ou prix en IDR : un prix ou un set menu n'est PAS une simple promo de menu quand c'est une soiree evenementielle datee.
 - VALIDE si une date exacte est donnee dans le texte ou deja extraite, et qu'elle n'est pas strictement dans le passe par rapport a aujourd'hui.
 - Si l'annee indiquee dans le texte ou deja extraite rend l'evenement chronologiquement impossible (ex: annee passee alors que le post est recent) -> c'est une coquille du createur du flyer, pas une erreur d'extraction : corrige avec l'annee coherente la plus proche dans le futur et classe VALIDE.
 - IGNORE si aucune date ni jour de semaine n'est exploitable dans le texte fourni.

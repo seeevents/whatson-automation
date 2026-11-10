@@ -41,6 +41,17 @@ MONTHS = {
     "nov": 11, "november": 11, "novembre": 11,
     "dec": 12, "december": 12, "decembre": 12, "décembre": 12,
 }
+# Fetes sans date ecrite dans le texte ("New Year's Eve at La Brisa") -> (regex, mois, jour)
+HOLIDAYS = [
+    (r"\bnew\s*year[’']?s?\s+eve\b|\bnye\b", 12, 31),
+    (r"\bchristmas\s+eve\b|\bxmas\s+eve\b", 12, 24),
+    (r"\bchristmas\s+day\b", 12, 25),
+    (r"\bnew\s*year[’']?s?\s+day\b", 1, 1),
+    (r"\bvalentine[’']?s?(\s+day)?\b", 2, 14),
+    (r"\bhalloween\b", 10, 31),
+]
+# Marqueurs de recap/passe : le texte parle d'une fete deja passee -> pas de date deduite
+HOLIDAY_PAST_MARKERS = r"\b(last|thank|thanks|recap|throwback|was|were|had|what a|unforgettable)\b"
 MONTH_PATTERN = "|".join(sorted(MONTHS.keys(), key=len, reverse=True))
 
 
@@ -141,6 +152,19 @@ def extract_date(text: str, reference_date: date) -> DateExtractionResult:
             )
         except ValueError:
             pass
+
+    # --- Cas 6 : fete connue sans date ecrite (NYE, Christmas Eve, Halloween...) ---
+    for pattern, h_month, h_day in HOLIDAYS:
+        if re.search(pattern, t):
+            year = reference_date.year
+            if date(year, h_month, h_day) < reference_date:
+                year += 1
+            holiday_date = date(year, h_month, h_day).strftime("%Y-%m-%d")
+            if re.search(HOLIDAY_PAST_MARKERS, t):
+                return DateExtractionResult(
+                    "", "low", f"fete connue ({holiday_date}) mais formulation evoquant le passe - fallback Claude"
+                )
+            return DateExtractionResult(holiday_date, "high", f"fete connue sans date ecrite -> {holiday_date}")
 
     # --- Aucun pattern fiable trouve ---
     # Distingue deux cas : "vraiment aucun signal temporel du tout" (haute
