@@ -17,7 +17,7 @@ def main() -> int:
     for r in results:
         if r["action"] in ("create", "update", "update_verified_only", "skip_venue", "error"):
             o = r.get("offer") or {}
-            line = {k: o.get(k) for k in ("kind", "title", "description", "days_of_week", "start_time", "end_time", "end_date", "is_active")}
+            line = {k: o.get(k) for k in ("kind", "title", "description", "days_of_week", "start_time", "end_time", "start_date", "end_date", "is_active")}
             print(f"::notice::{r['action']} | {r.get('note','')} | {json.dumps(line, ensure_ascii=False, default=str)}"[:700])
     return 0
 
