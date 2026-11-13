@@ -117,3 +117,6 @@ def validate_config() -> list[str]:
         if not os.environ.get(name):
             missing.append(name)
     return missing
+
+# Source de la liste des comptes a scraper : "supabase" (defaut, repli InstaCheck) ou "instacheck".
+ACCOUNTS_SOURCE = os.environ.get("ACCOUNTS_SOURCE", "supabase").strip().lower()
