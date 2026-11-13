@@ -123,3 +123,5 @@ ACCOUNTS_SOURCE = os.environ.get("ACCOUNTS_SOURCE", "supabase").strip().lower()
 
 # Offres recurrentes (happy hours / promos) -> venue_offers. Ecriture desactivee par defaut (essai a blanc).
 OFFERS_WRITE_ENABLED = os.environ.get("OFFERS_WRITE_ENABLED", "false").strip().lower() == "true"
+# Offres deja existantes : "verified_only" (premier passage valide par le BO : seul last_verified_at) ou "full".
+OFFERS_UPDATE_MODE = os.environ.get("OFFERS_UPDATE_MODE", "verified_only").strip().lower()
