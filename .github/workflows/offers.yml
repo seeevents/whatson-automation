@@ -1,0 +1,28 @@
+name: WhatsOn - Offres (happy hours / promos)
+on:
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: "Fenetre (jours) de lignes Ignore a relire"
+        default: "2"
+      write:
+        description: "true = ecrire dans venue_offers (accord du BO requis)"
+        default: "false"
+jobs:
+  offers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Offres
+        env:
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OFFERS_WRITE_ENABLED: ${{ inputs.write }}
+        run: python scripts/run_offers.py ${{ inputs.lookback_days }}
