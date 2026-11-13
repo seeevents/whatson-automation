@@ -25,12 +25,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from config import settings
-from src import airtable_client, claude_client
+from src import airtable_client, claude_client, dedup
 from src import publication_supabase as ps
 
 logger = logging.getLogger("whatson.offers")
 
 LOOKBACK_DAYS = 2
+MANUAL_EDIT_GRACE = timedelta(hours=2)  # le BO ecrit slug/SEO/market apres creation
 _seen_run: list[tuple[str, str, str]] = []
 
 PREFILTER = re.compile(
@@ -105,6 +106,35 @@ def _month_end(today: str) -> str:
     d = datetime.strptime(today, "%Y-%m-%d")
     nxt = (d.replace(day=28) + timedelta(days=4)).replace(day=1)
     return (nxt - timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+def _edited_by_hand(existing: dict) -> bool:
+    """updated_at depasse last_verified_at de plus de 2 h (le BO ecrit slug/SEO/market juste apres la creation)."""
+    try:
+        upd = datetime.fromisoformat(str(existing["updated_at"]).replace("Z", "+00:00"))
+        ver = datetime.fromisoformat(str(existing["last_verified_at"]).replace("Z", "+00:00"))
+    except (KeyError, ValueError, TypeError):
+        return False
+    return upd - ver > MANUAL_EDIT_GRACE
+
+
+def _marker(id_offer: str, end_date: str) -> str:
+    return f"offer-end-default:{id_offer}:{end_date}"
+
+
+def _mark_default_end(id_offer: str, end_date: str) -> None:
+    """Memorise (table Instagram_Items_Vus) que NOUS avons pose cette fin par defaut."""
+    try:
+        dedup.mark_processed(_marker(id_offer, end_date))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Marqueur fin par defaut non enregistre (%s)", type(exc).__name__)
+
+
+def _end_is_default(id_offer: str, end_date: str) -> bool:
+    try:
+        return dedup.already_processed(_marker(id_offer, end_date))
+    except Exception:  # noqa: BLE001
+        return False  # dans le doute on ne prolonge pas
 
 
 def _venue_is_main(id_venue: str) -> tuple[bool, str, dict]:
@@ -193,15 +223,14 @@ def process_record(record: dict, today: str, write: bool) -> dict:
 
     if existing:
         # Modifiee a la main depuis notre derniere ecriture ? -> seulement last_verified_at.
-        manual = bool(existing.get("updated_at") and existing.get("last_verified_at")
-                      and existing["updated_at"] > existing["last_verified_at"])
+        manual = _edited_by_hand(existing)
         patch = {"last_verified_at": now}
         if not manual:
             cur_end = existing.get("end_date")
             if offer["explicit_end"]:
                 patch["end_date"] = offer["end_date"]          # dates du post : telles quelles
-            elif cur_end and cur_end == _month_end(cur_end) and cur_end < row["end_date"]:
-                patch["end_date"] = row["end_date"]            # prolongation: fin du mois courant
+            elif cur_end and cur_end < row["end_date"] and _end_is_default(existing["id_offer"], cur_end):
+                patch["end_date"] = row["end_date"]            # prolongation: fin posee par defaut par nous
             # champs vides seulement (jamais d'ecrasement)
             for k in ("description", "end_time", "image_url"):
                 if row.get(k) and not existing.get(k):
@@ -209,12 +238,16 @@ def process_record(record: dict, today: str, write: bool) -> dict:
         if write:
             ps._request("PATCH", "venue_offers", params={"id_offer": f"eq.{existing['id_offer']}"},
                         json_body=patch, prefer="return=minimal")
+            if "end_date" in patch and not offer["explicit_end"]:
+                _mark_default_end(existing["id_offer"], patch["end_date"])
         return {"action": "update_verified_only" if manual else "update", "note": venue_name, "offer": row,
                 "id": existing["id_offer"]}
 
     row.update({"id_offer": str(uuid.uuid4()), "last_verified_at": now})
     if write:
         ps._request("POST", "venue_offers", json_body=row, prefer="return=minimal")
+        if not offer["explicit_end"]:
+            _mark_default_end(row["id_offer"], row["end_date"])
     return {"action": "create", "note": venue_name, "offer": row}
 
 
