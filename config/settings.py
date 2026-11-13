@@ -47,6 +47,8 @@ STATUT_RAPPORTE = "Rapporté"
 # --- Anthropic ---
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = "claude-sonnet-5"
+# Modele leger pour les petites taches mecaniques (categorie, heure, SEO) - beaucoup moins cher.
+CLAUDE_SMALL_MODEL = os.environ.get("CLAUDE_SMALL_MODEL", "claude-haiku-4-5-20251001")
 
 # --- GoodBarber (via MCP, appelé depuis l'API Anthropic) ---
 GOODBARBER_MCP_URL = "https://mcp.goodbarber.dev/2940713/mcp/sse"
