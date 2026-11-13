@@ -44,7 +44,7 @@ SYSTEM_PROMPT = """Tu analyses un post Instagram d'un bar/restaurant/club de Bal
 Reponds UNIQUEMENT avec un objet JSON :
 {"is_offer": bool, "kind": "happy_hour"|"promo", "title": str, "description": str|null,
  "days_of_week": [int]|null, "start_time": "HH:MM"|null, "end_time": "HH:MM"|null,
- "end_date": "YYYY-MM-DD"|null, "reason": str}
+ "start_date": "YYYY-MM-DD"|null, "end_date": "YYYY-MM-DD"|null, "reason": str}
 Regles :
 - is_offer=true seulement pour une offre commerciale recurrente ou durable (happy hour, ladies night, brunch avec formule, 2 pour 1, free flow, promo sur la carte avec prix/remise). false pour un evenement ponctuel avec DJ/line-up/date precise (c'est un event), un simple plat sans offre, un post sans offre.
 - kind="happy_hour" pour une happy hour ; tout le reste (ladies night, brunch, offre boissons, offre du jour) = "promo".
@@ -52,7 +52,7 @@ Regles :
 - description : l'offre en une phrase (prix, remise, conditions), sinon null.
 - days_of_week : entiers ISO, 1=lundi ... 7=dimanche ("daily"/"every day" = [1,2,3,4,5,6,7], "Mon-Fri" = [1,2,3,4,5]). null si le post ne le dit pas.
 - start_time / end_time : heure de Bali au format 24h. Si une seule borne est donnee, l'autre est null. NE JAMAIS DEVINER : si absent, null.
-- end_date : seulement si le post donne une date de fin explicite, sinon null.
+- start_date / end_date : seulement si le post donne explicitement une date de debut / de fin (ex: "from 15 Nov", "until 30 Nov", "all month long" = fin du mois courant), sinon null.
 """
 
 
@@ -82,7 +82,12 @@ def extract_offer(caption: str, venue_name: str, today: str) -> dict | None:
         return None
     days = data.get("days_of_week")
     days = sorted({int(d) for d in days if str(d).isdigit() and 1 <= int(d) <= 7}) if isinstance(days, list) else []
-    end_date = data.get("end_date") if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(data.get("end_date") or "")) else None
+    def _iso(v):
+        return v if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(v or "")) else None
+    end_date = _iso(data.get("end_date"))
+    start_date = _iso(data.get("start_date"))
+    if end_date and end_date < today:  # offre deja terminee
+        return None
     return {
         "kind": kind,
         "title": title,
@@ -90,8 +95,15 @@ def extract_offer(caption: str, venue_name: str, today: str) -> dict | None:
         "days_of_week": days,
         "start_time": _hhmm(data.get("start_time")),
         "end_time": _hhmm(data.get("end_time")),
+        "start_date": start_date,
         "end_date": end_date,
     }
+
+
+def _month_end(today: str) -> str:
+    d = datetime.strptime(today, "%Y-%m-%d")
+    nxt = (d.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return (nxt - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
 def _venue_is_main(id_venue: str) -> tuple[bool, str, dict]:
@@ -138,8 +150,10 @@ def build_row(offer: dict, venue: dict, image_url: str, today: str) -> dict:
         "days_of_week": offer["days_of_week"] or None,
         "start_time": offer["start_time"],
         "end_time": offer["end_time"],
-        "start_date": today,
-        "end_date": offer["end_date"],
+        # Dates : celles du post si elles existent ; sinon debut = jour du scrape,
+        # fin = fin du mois en cours (regle validee avec Katia).
+        "start_date": offer.get("start_date") or today,
+        "end_date": offer["end_date"] or _month_end(today),
         "is_active": active,
         "market": venue.get("market"),
     }
