@@ -73,8 +73,16 @@ def _hhmm(value) -> str | None:
 def extract_offer(caption: str, venue_name: str, today: str) -> dict | None:
     """Appel Claude ; retourne un dict normalise ou None si ce n'est pas une offre."""
     user = f"Date du jour (Bali) : {today}\nLieu : {venue_name}\n\nLegende du post :\n{caption[:3000]}"
-    resp = claude_client.call_claude(SYSTEM_PROMPT, user, max_tokens=600)
-    data = claude_client.extract_json_from_response(resp)
+    data = None
+    for max_tokens in (1000, 2000):  # 2e essai plus large si la reponse est tronquee
+        try:
+            data = claude_client.extract_json_from_response(
+                claude_client.call_claude(SYSTEM_PROMPT, user, max_tokens=max_tokens))
+            break
+        except claude_client.ClaudeError:
+            if max_tokens == 2000:
+                raise
+    
     if not data.get("is_offer"):
         return None
     kind = data.get("kind") if data.get("kind") in ("happy_hour", "promo") else "promo"
