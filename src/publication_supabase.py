@@ -88,6 +88,7 @@ def _classify_event_category(titre: str, caption: str) -> str:
             EVENT_CATEGORY_SYSTEM_PROMPT,
             f"Titre: {titre}\nTexte: {caption}",
             max_tokens=100,
+            model=claude_client.SMALL_MODEL,
         )
         result = claude_client.extract_json_from_response(response)
         category = str(result.get("category", "")).strip().lower()
@@ -375,6 +376,8 @@ def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
         return _result("skipped_no_venue",
                        f"venue {who} introuvable dans le back-office - non publie sur la V2, a creer dans le back-office.")
 
+    if callable(event_time):  # extraction d'heure (appel Claude) seulement une fois la venue trouvee
+        event_time = event_time()
     hour, minute = event_time if event_time else (DEFAULT_HOUR_BALI, 0)
     start_utc = _bali_to_utc(date_str, hour, minute)
     # Same convention as the GoodBarber (V1) publication: end of the same

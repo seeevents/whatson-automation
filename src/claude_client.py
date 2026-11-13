@@ -16,13 +16,16 @@ from typing import Any
 
 import requests
 
-from config.settings import ANTHROPIC_API_KEY, CLAUDE_MODEL
+from config.settings import ANTHROPIC_API_KEY, CLAUDE_MODEL, CLAUDE_SMALL_MODEL
 
 logger = logging.getLogger("whatson.claude")
 
 API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 MAX_RETRIES = 3
+
+
+SMALL_MODEL = CLAUDE_SMALL_MODEL  # a passer en model=... pour les petites taches
 
 
 class ClaudeError(Exception):
@@ -35,6 +38,7 @@ def call_claude(
     max_tokens: int = 2048,
     mcp_servers: list[dict[str, Any]] | None = None,
     mcp_beta: bool = False,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """
     Appelle l'API Messages d'Anthropic. Retourne la réponse JSON brute
@@ -52,7 +56,7 @@ def call_claude(
         headers["anthropic-beta"] = "mcp-client-2025-04-04"
 
     body: dict[str, Any] = {
-        "model": CLAUDE_MODEL,
+        "model": model or CLAUDE_MODEL,
         "max_tokens": max_tokens,
         "system": [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
         "messages": [{"role": "user", "content": user_message}],

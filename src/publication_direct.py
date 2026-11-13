@@ -108,6 +108,7 @@ def _generate_seo_description(titre: str, venue: str) -> str:
             SEO_SYSTEM_PROMPT,
             f"Event: {titre}\nVenue: {venue}, Bali",
             max_tokens=300,
+            model=claude_client.SMALL_MODEL,
         )
         result = claude_client.extract_json_from_response(response)
         description = result.get("description", "")
@@ -124,6 +125,7 @@ def _classify_type_category(titre: str, caption: str) -> int:
             CATEGORY_SYSTEM_PROMPT,
             f"Titre: {titre}\nTexte: {caption}",
             max_tokens=100,
+            model=claude_client.SMALL_MODEL,
         )
         result = claude_client.extract_json_from_response(response)
         category_name = result.get("category", "Other")
@@ -139,7 +141,7 @@ def _extract_event_time(caption: str) -> tuple[int, int] | None:
     if not caption:
         return None
     try:
-        response = claude_client.call_claude(TIME_SYSTEM_PROMPT, f"Texte: {caption}", max_tokens=50)
+        response = claude_client.call_claude(TIME_SYSTEM_PROMPT, f"Texte: {caption}", max_tokens=50, model=claude_client.SMALL_MODEL)
         result = claude_client.extract_json_from_response(response)
         time_str = result.get("time", "")
         if not time_str or ":" not in time_str:
@@ -504,8 +506,9 @@ def _run_v2_only(dry_run_record_ids: list[str] | None = None) -> dict[str, int]:
         f = record["fields"]
         date_str = f.get(settings.FLD_DATE, "") or ""
         try:
-            event_time = _extract_event_time(f.get(settings.FLD_LEGENDE, "") or "")
-            v2 = publication_supabase.publish_to_supabase(record, event_time)
+            caption = f.get(settings.FLD_LEGENDE, "") or ""
+            # lazy : l'appel Claude (heure) n'a lieu que si la venue est trouvee dans la V2
+            v2 = publication_supabase.publish_to_supabase(record, lambda: _extract_event_time(caption))
             v2_status = v2["status"]
             v2_summary[v2_status] = v2_summary.get(v2_status, 0) + 1
 
