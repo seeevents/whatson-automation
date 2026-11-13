@@ -289,7 +289,13 @@ def _find_venue(handle: str, venue_name: str) -> tuple[dict | None, str]:
         return None, "no_venue"
     if len(scored) > 1 and scored[0][0] - scored[1][0] < VENUE_NAME_MARGIN and scored[1][0] >= VENUE_NAME_SIMILARITY_MIN:
         return None, "ambiguous_venue"
-    return scored[0][1], ""
+    best = scored[0][1]
+    # Securite : le handle de l'event est connu mais absent du BO. Si la venue
+    # trouvee par le nom a un AUTRE compte Instagram, c'est un autre lieu.
+    best_handle = _normalize_handle(best.get("instagram_url") or "")
+    if handle and best_handle and best_handle != handle:
+        return None, "no_venue"
+    return best, ""
 
 
 def _find_existing_event(venue_id: str, start_utc: datetime, titre: str) -> dict | None:
