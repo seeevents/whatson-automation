@@ -174,7 +174,7 @@ def _find_existing(id_venue: str, offer: dict) -> dict | None:
             return r
     # Heure de debut inconnue : meme venue + meme kind + memes jours (si connus des deux
     # cotes) + titre proche (similarite >= 0.6 ou l'un contient l'autre).
-    if _same_day_key_missing(offer):
+    if True:
         for r in rows:
             r_days = sorted(r.get("days_of_week") or [])
             if offer["days_of_week"] and r_days and r_days != offer["days_of_week"]:
@@ -244,7 +244,7 @@ def process_record(record: dict, today: str, write: bool) -> dict:
         # Modifiee a la main depuis notre derniere ecriture ? -> seulement last_verified_at.
         manual = _edited_by_hand(existing)
         patch = {"last_verified_at": now}
-        if not manual:
+        if not manual and settings.OFFERS_UPDATE_MODE == "full":
             cur_end = existing.get("end_date")
             if offer["explicit_end"]:
                 patch["end_date"] = offer["end_date"]          # dates du post : telles quelles
