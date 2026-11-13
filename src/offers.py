@@ -158,6 +158,13 @@ def _venue_is_main(id_venue: str) -> tuple[bool, str, dict]:
     return True, "", v
 
 
+def _titles_close(a: str, b: str) -> bool:
+    na, nb = ps._normalize_text(a), ps._normalize_text(b)
+    if not na or not nb:
+        return False
+    return na in nb or nb in na or ps._similarity(a, b) >= 0.6
+
+
 def _find_existing(id_venue: str, offer: dict) -> dict | None:
     rows = ps._request("GET", "venue_offers", params={
         "select": "*", "id_venue": f"eq.{id_venue}", "kind": f"eq.{offer['kind']}", "limit": "50"}) or []
@@ -165,10 +172,14 @@ def _find_existing(id_venue: str, offer: dict) -> dict | None:
         if (sorted(r.get("days_of_week") or []) == offer["days_of_week"]
                 and offer["start_time"] and (r.get("start_time") or "") == offer["start_time"]):
             return r
-    # Sans cle complete (jours/heure inconnus) : meme venue + meme kind + titre tres proche.
+    # Heure de debut inconnue : meme venue + meme kind + memes jours (si connus des deux
+    # cotes) + titre proche (similarite >= 0.6 ou l'un contient l'autre).
     if _same_day_key_missing(offer):
         for r in rows:
-            if ps._similarity(offer["title"], r.get("title") or "") >= 0.7:
+            r_days = sorted(r.get("days_of_week") or [])
+            if offer["days_of_week"] and r_days and r_days != offer["days_of_week"]:
+                continue
+            if _titles_close(offer["title"], r.get("title") or ""):
                 return r
     return None
 
