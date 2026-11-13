@@ -58,7 +58,7 @@ VENUE_NAME_SIMILARITY_MIN = 0.85
 VENUE_NAME_MARGIN = 0.05        # ecart minimum entre le meilleur et le 2e candidat (sinon ambigu)
 
 VENUE_COLUMNS = "id_venue,name,instagram_url,market,latitude,longitude"
-EVENT_COLUMNS = "id_event,title,date_time,end_date_time,categories,description,image_url,source_type"
+EVENT_COLUMNS = "id_event,title,date_time,end_date_time,categories,description,image_url,source_type,ticket_buy_url"
 
 # Event.categories is a jsonb list (an event can be e.g. DJ + Top event at
 # once) - the pipeline only ever auto-fills the type tag below, it never
@@ -298,6 +298,51 @@ def _find_venue(handle: str, venue_name: str) -> tuple[dict | None, str]:
     return best, ""
 
 
+# --------------------------------------------------------------------------
+# Lien de billetterie (liste alignee avec le back-office)
+# --------------------------------------------------------------------------
+
+TICKET_DOMAINS = (
+    "megatix.co.id", "megatix.com", "eventbrite.com", "eventbrite.co.id", "loket.com",
+    "tiket.com", "tix.id", "dice.fm", "ra.co", "xceed.me", "universe.com", "uni.ve",
+    "tickettailor.com", "ticketbox.id", "ticketbox.vn", "yesplis.com", "goers.id", "bookeo.com",
+)
+TICKET_URL_MAX = 200
+_TRACKING_PARAM = re.compile(r"^(utm_.*|fbclid|igsh|igshid|gclid|mc_.*|_ga|ref_src)$", re.IGNORECASE)
+_URL_CANDIDATE = re.compile(r"(?<![@\w.-])((?:https?://)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s<>\"']*)?)", re.IGNORECASE)
+
+
+def _is_ticket_host(host: str) -> bool:
+    host = host.lower().removeprefix("www.")
+    return any(host == d or host.endswith("." + d) for d in TICKET_DOMAINS)
+
+
+def _extract_ticket_url(caption: str) -> str:
+    """Lien de billetterie unique et propre trouve dans la caption, sinon ''.
+    Plusieurs liens differents -> '' (ambigu). Raccourcis/Linktree ignores."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    found: dict[str, str] = {}
+    for m in _URL_CANDIDATE.finditer(caption or ""):
+        raw = m.group(1).rstrip(".,;:!?)]}>»”’'\"")
+        url = raw if raw.lower().startswith("http") else "https://" + raw
+        try:
+            parts = urlsplit(url)
+        except ValueError:
+            continue
+        if not parts.hostname or not _is_ticket_host(parts.hostname):
+            continue
+        query = urlencode([(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+                           if not _TRACKING_PARAM.match(k)])
+        clean = urlunsplit((parts.scheme.lower(), parts.netloc, parts.path.rstrip("/") if parts.path != "/" else "", query, ""))
+        found[clean.lower()] = clean
+    if len(found) != 1:
+        return ""
+    url = next(iter(found.values()))
+    return url if len(url) <= TICKET_URL_MAX else ""
+
+
+
 def _find_existing_event(venue_id: str, start_utc: datetime, titre: str) -> dict | None:
     """Meme venue + date a +/- 2 jours (heure de Bali) + titre proche."""
     margin = timedelta(days=DATE_WINDOW_DAYS + 1)
@@ -414,6 +459,10 @@ def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
         # category yet, never override a staff member's manual pick.
         if not existing.get("categories"):
             payload["categories"] = [_classify_event_category(titre, caption)]
+        ticket_url = _extract_ticket_url(caption)
+        if ticket_url and not (existing.get("ticket_buy_url") or "").strip():
+            payload["ticket_buy_url"] = ticket_url
+            payload["booking_channel_override"] = "external_link"
         current_desc = existing.get("description") or ""
         if caption and not current_desc:
             payload["description"] = caption
@@ -451,6 +500,10 @@ def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
         "longitude": venue.get("longitude"),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    ticket_url = _extract_ticket_url(caption)
+    if ticket_url:
+        row["ticket_buy_url"] = ticket_url
+        row["booking_channel_override"] = "external_link"
     _request("POST", "events", json_body=row, prefer="return=minimal")
     return _result("created", f"event cree (id {event_id}).{_note(image_note)}", event_id)
 
