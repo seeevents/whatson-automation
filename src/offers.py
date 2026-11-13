@@ -97,6 +97,7 @@ def extract_offer(caption: str, venue_name: str, today: str) -> dict | None:
         "end_time": _hhmm(data.get("end_time")),
         "start_date": start_date,
         "end_date": end_date,
+        "explicit_end": bool(end_date),
     }
 
 
@@ -194,8 +195,17 @@ def process_record(record: dict, today: str, write: bool) -> dict:
         # Modifiee a la main depuis notre derniere ecriture ? -> seulement last_verified_at.
         manual = bool(existing.get("updated_at") and existing.get("last_verified_at")
                       and existing["updated_at"] > existing["last_verified_at"])
-        patch = {"last_verified_at": now} if manual else {**{k: v for k, v in row.items()
-                 if k in ("title", "description", "end_time", "end_date", "image_url") and v}, "last_verified_at": now}
+        patch = {"last_verified_at": now}
+        if not manual:
+            cur_end = existing.get("end_date")
+            if offer["explicit_end"]:
+                patch["end_date"] = offer["end_date"]          # dates du post : telles quelles
+            elif cur_end and cur_end == _month_end(cur_end) and cur_end < row["end_date"]:
+                patch["end_date"] = row["end_date"]            # prolongation: fin du mois courant
+            # champs vides seulement (jamais d'ecrasement)
+            for k in ("description", "end_time", "image_url"):
+                if row.get(k) and not existing.get(k):
+                    patch[k] = row[k]
         if write:
             ps._request("PATCH", "venue_offers", params={"id_offer": f"eq.{existing['id_offer']}"},
                         json_body=patch, prefer="return=minimal")
