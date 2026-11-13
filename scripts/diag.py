@@ -61,6 +61,15 @@ def graph():
     return f"{len(accs)} comptes InstaCheck"
 
 
+def gemini():
+    from config import settings
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.GEMINI_MODEL}:generateContent"
+    r = requests.post(url, headers={"Content-Type": "application/json", "x-goog-api-key": settings.GEMINI_API_KEY},
+                      json={"contents": [{"parts": [{"text": "Reply with the word OK"}]}]}, timeout=60)
+    return f"{r.status_code} {r.text[:120]}"
+
+
+check("gemini", gemini)
 check("airtable_items_vus", airtable_read)
 check("airtable_events_collectes", airtable_events_count)
 check("apify", apify)
