@@ -120,3 +120,6 @@ def validate_config() -> list[str]:
 
 # Source de la liste des comptes a scraper : "supabase" (defaut, repli InstaCheck) ou "instacheck".
 ACCOUNTS_SOURCE = os.environ.get("ACCOUNTS_SOURCE", "supabase").strip().lower()
+
+# Offres recurrentes (happy hours / promos) -> venue_offers. Ecriture desactivee par defaut (essai a blanc).
+OFFERS_WRITE_ENABLED = os.environ.get("OFFERS_WRITE_ENABLED", "false").strip().lower() == "true"
