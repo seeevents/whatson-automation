@@ -31,6 +31,7 @@ from src import publication_supabase as ps
 logger = logging.getLogger("whatson.offers")
 
 LOOKBACK_DAYS = 2
+_seen_run: list[tuple[str, str, str]] = []
 
 PREFILTER = re.compile(
     r"happy\s*hours?|ladies?\s*night|free\s*flow|\b\d\s*(for|x)\s*\d\b|buy\s*\d.*get\s*\d|"
@@ -113,6 +114,11 @@ def _find_existing(id_venue: str, offer: dict) -> dict | None:
         if (sorted(r.get("days_of_week") or []) == offer["days_of_week"]
                 and offer["start_time"] and (r.get("start_time") or "") == offer["start_time"]):
             return r
+    # Sans cle complete (jours/heure inconnus) : meme venue + meme kind + titre tres proche.
+    if _same_day_key_missing(offer):
+        for r in rows:
+            if ps._similarity(offer["title"], r.get("title") or "") >= 0.7:
+                return r
     return None
 
 
@@ -162,7 +168,12 @@ def process_record(record: dict, today: str, write: bool) -> dict:
     venue = {**venue, **vfull}
 
     row = build_row(offer, venue, image_url, today)
-    existing = None if _same_day_key_missing(offer) else _find_existing(venue["id_venue"], offer)
+    existing = _find_existing(venue["id_venue"], offer)
+    for sid, skind, stitle in _seen_run:  # meme offre deja vue dans ce passage (posts repetes)
+        if (sid == venue["id_venue"] and skind == offer["kind"]
+                and ps._similarity(offer["title"], stitle) >= 0.7):
+            return {"action": "skip_duplicate", "note": f"{venue_name}: meme offre deja vue dans ce passage"}
+    _seen_run.append((venue["id_venue"], offer["kind"], offer["title"]))
     now = datetime.now(timezone.utc).isoformat()
 
     if existing:
@@ -190,6 +201,7 @@ def run(write: bool | None = None, lookback_days: int = LOOKBACK_DAYS) -> list[d
                f"IS_AFTER(CREATED_TIME(), DATEADD(NOW(), -{int(lookback_days)}, 'days')))")
     records = airtable_client.search_records(settings.AIRTABLE_TABLE_EVENTS, formula=formula, max_records=2000)
     results = []
+    _seen_run.clear()
     for rec in records:
         try:
             res = process_record(rec, today, write)
