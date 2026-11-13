@@ -1,6 +1,10 @@
 name: WhatsOn - Comparaison comptes (Supabase vs InstaCheck)
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      script:
+        description: "Script a lancer"
+        default: compare_accounts.py
 jobs:
   compare:
     runs-on: ubuntu-latest
@@ -18,4 +22,4 @@ jobs:
           MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
           MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
           MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
-        run: python scripts/compare_accounts.py
+        run: python scripts/${{ inputs.script || 'compare_accounts.py' }}
