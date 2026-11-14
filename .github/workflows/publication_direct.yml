@@ -32,6 +32,7 @@ jobs:
           MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ALLDAY_CONVENTION_ENABLED: "true"   # convention "All day" du BO (00:00 -> 23:59), confirmee le 14/11
         run: python scripts/run_publication_direct.py
 
       - name: Offres recurrentes (happy hours / promos)
@@ -43,6 +44,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           OFFERS_WRITE_ENABLED: "true"
+          ALLDAY_CONVENTION_ENABLED: "true"
           # Retenues jusqu'a confirmation du back-office (retirer de la liste une fois confirme).
           OFFERS_HOLD_VENUES: ""
         run: python scripts/run_offers.py 2
