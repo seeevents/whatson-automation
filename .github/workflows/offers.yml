@@ -5,6 +5,9 @@ on:
       lookback_days:
         description: "Fenetre (jours) de lignes Ignore a relire"
         default: "2"
+      only_venues:
+        description: "Optionnel: venues autorisees, separees par |"
+        default: ""
       write:
         description: "true = ecrire dans venue_offers (accord du BO requis)"
         default: "false"
@@ -25,4 +28,5 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           OFFERS_WRITE_ENABLED: ${{ inputs.write }}
+          OFFERS_ONLY_VENUES: ${{ inputs.only_venues }}
         run: python scripts/run_offers.py ${{ inputs.lookback_days }}
