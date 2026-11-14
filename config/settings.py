@@ -127,3 +127,5 @@ OFFERS_WRITE_ENABLED = os.environ.get("OFFERS_WRITE_ENABLED", "false").strip().l
 OFFERS_UPDATE_MODE = os.environ.get("OFFERS_UPDATE_MODE", "verified_only").strip().lower()
 # Si renseigne (noms de venues separes par "|"), seules ces venues sont traitees par les offres; les autres sont retenues.
 OFFERS_ONLY_VENUES = {v.strip().lower() for v in os.environ.get("OFFERS_ONLY_VENUES", "").split("|") if v.strip()}
+# Venues dont les offres sont retenues (separees par "|") tant que le BO n'a pas confirme.
+OFFERS_HOLD_VENUES = {v.strip().lower() for v in os.environ.get("OFFERS_HOLD_VENUES", "").split("|") if v.strip()}

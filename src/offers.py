@@ -162,7 +162,10 @@ def _titles_close(a: str, b: str) -> bool:
     na, nb = ps._normalize_text(a), ps._normalize_text(b)
     if not na or not nb:
         return False
-    return na in nb or nb in na or ps._similarity(a, b) >= 0.6
+    if na in nb or nb in na or ps._similarity(a, b) >= 0.6:
+        return True
+    ta, tb = set(na.split()), set(nb.split())
+    return bool(ta and tb) and len(ta & tb) / min(len(ta), len(tb)) >= 0.6  # forte part de mots communs
 
 
 def _find_existing(id_venue: str, offer: dict) -> dict | None:
@@ -227,6 +230,8 @@ def process_record(record: dict, today: str, write: bool) -> dict:
     if not offer:
         return {"action": "skip", "note": "pas une offre recurrente"}
 
+    if venue_name.strip().lower() in settings.OFFERS_HOLD_VENUES:
+        return {"action": "held", "note": f"{venue_name} (en attente de confirmation BO)", "offer": offer}
     only = settings.OFFERS_ONLY_VENUES
     if only and venue_name.strip().lower() not in only:
         return {"action": "held", "note": f"{venue_name} (en attente de validation BO)", "offer": offer}

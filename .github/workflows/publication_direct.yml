@@ -33,3 +33,16 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python scripts/run_publication_direct.py
+
+      - name: Offres recurrentes (happy hours / promos)
+        # Apres la publication des events. Une erreur ici ne doit jamais faire echouer la publication.
+        continue-on-error: true
+        env:
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OFFERS_WRITE_ENABLED: "true"
+          # Retenues jusqu'a confirmation du back-office (retirer de la liste une fois confirme).
+          OFFERS_HOLD_VENUES: "Oldmans Bali|Bamboo Bar & Grill Kuta|Tabu Bali"
+        run: python scripts/run_offers.py 2
