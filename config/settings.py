@@ -131,3 +131,5 @@ OFFERS_ONLY_VENUES = {v.strip().lower() for v in os.environ.get("OFFERS_ONLY_VEN
 OFFERS_HOLD_VENUES = {v.strip().lower() for v in os.environ.get("OFFERS_HOLD_VENUES", "").split("|") if v.strip()}
 # Alias de comptes pour les offres, "compte_source=compte_venue" separes par "|" (ex: compte d'un groupe).
 OFFERS_HANDLE_ALIASES = dict(x.strip().lower().split("=", 1) for x in os.environ.get("OFFERS_HANDLE_ALIASES", "").split("|") if "=" in x)
+# Convention "All day" du BO (00:00 -> 23:59). NE PAS activer avant confirmation du BO et de l'app V2.
+ALLDAY_CONVENTION_ENABLED = os.environ.get("ALLDAY_CONVENTION_ENABLED", "false").strip().lower() == "true"

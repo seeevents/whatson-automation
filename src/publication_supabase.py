@@ -429,7 +429,10 @@ def _publish(record: dict, event_time: tuple[int, int] | None) -> dict:
 
     if callable(event_time):  # extraction d'heure (appel Claude) seulement une fois la venue trouvee
         event_time = event_time()
-    hour, minute = event_time if event_time else (DEFAULT_HOUR_BALI, 0)
+    # Convention "All day" du BO : sans heure dans le post, 00:00 -> 23:59 (heure de Bali).
+    # Desactive par defaut tant que le BO et l'app ne l'ont pas confirmee.
+    default_hm = (0, 0) if settings.ALLDAY_CONVENTION_ENABLED else (DEFAULT_HOUR_BALI, 0)
+    hour, minute = event_time if event_time else default_hm
     start_utc = _bali_to_utc(date_str, hour, minute)
     # Same convention as the GoodBarber (V1) publication: end of the same
     # day (23:59 Bali time) when no real end date is known.
