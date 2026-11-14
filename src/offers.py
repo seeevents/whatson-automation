@@ -237,6 +237,7 @@ def process_record(record: dict, today: str, write: bool) -> dict:
     if only and venue_name.strip().lower() not in only:
         return {"action": "held", "note": f"{venue_name} (en attente de validation BO)", "offer": offer}
 
+    handle = settings.OFFERS_HANDLE_ALIASES.get(handle, handle)  # ex: compte du groupe -> compte de la venue
     venue, reason = ps._find_venue(handle, venue_name)
     if not venue:
         return {"action": "skip_venue", "note": f"venue {reason} pour '{venue_name}' (@{handle})", "offer": offer}
