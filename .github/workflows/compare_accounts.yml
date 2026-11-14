@@ -5,6 +5,9 @@ on:
       script:
         description: "Script a lancer"
         default: compare_accounts.py
+      write:
+        description: "true = ecrire (scripts de conversion)"
+        default: "false"
 jobs:
   compare:
     runs-on: ubuntu-latest
@@ -22,4 +25,5 @@ jobs:
           MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
           MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
           MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
+          CONVERT_WRITE: ${{ inputs.write }}
         run: python scripts/${{ inputs.script || 'compare_accounts.py' }}

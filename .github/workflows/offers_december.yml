@@ -20,6 +20,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           OFFERS_WRITE_ENABLED: "true"
+          ALLDAY_CONVENTION_ENABLED: "true"
           OFFERS_UPDATE_MODE: "full"   # prolonge end_date au dernier jour du mois pour les fins posees par defaut
           OFFERS_HOLD_VENUES: "Tabu Bali"
         run: python scripts/run_offers.py 30
