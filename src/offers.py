@@ -274,6 +274,8 @@ def process_record(record: dict, today: str, write: bool) -> dict:
     if write and row.get("image_url"):
         # Les URL Instagram expirent en quelques jours : on rehberge dans Supabase Storage (comme les events).
         row["image_url"], _note = ps._rehost_image(row["image_url"])
+        if _note:  # lien Instagram deja expire ou inaccessible : mieux vaut pas d'image qu'un lien mort
+            row["image_url"] = None
     if write:
         ps._request("POST", "venue_offers", json_body=row, prefer="return=minimal")
         if not offer["explicit_end"]:
