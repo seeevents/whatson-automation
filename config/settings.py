@@ -129,3 +129,5 @@ OFFERS_UPDATE_MODE = os.environ.get("OFFERS_UPDATE_MODE", "verified_only").strip
 OFFERS_ONLY_VENUES = {v.strip().lower() for v in os.environ.get("OFFERS_ONLY_VENUES", "").split("|") if v.strip()}
 # Venues dont les offres sont retenues (separees par "|") tant que le BO n'a pas confirme.
 OFFERS_HOLD_VENUES = {v.strip().lower() for v in os.environ.get("OFFERS_HOLD_VENUES", "").split("|") if v.strip()}
+# Alias de comptes pour les offres, "compte_source=compte_venue" separes par "|" (ex: compte d'un groupe).
+OFFERS_HANDLE_ALIASES = dict(x.strip().lower().split("=", 1) for x in os.environ.get("OFFERS_HANDLE_ALIASES", "").split("|") if "=" in x)
