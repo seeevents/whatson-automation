@@ -13,7 +13,8 @@ for r in rows:
     new, note = ps._rehost_image(url)
     if note:
         failed += 1
-        print(f"::warning::{r['title']}: {note}")
+        print(f"::warning::{r['title']}: {note} -> image retiree (lien mort)")
+        ps._request("PATCH", "venue_offers", params={"id_offer": f"eq.{r['id_offer']}"}, json_body={"image_url": None}, prefer="return=minimal")
         continue
     ps._request("PATCH", "venue_offers", params={"id_offer": f"eq.{r['id_offer']}"}, json_body={"image_url": new}, prefer="return=minimal")
     fixed += 1
