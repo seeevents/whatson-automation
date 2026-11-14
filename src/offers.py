@@ -198,7 +198,13 @@ def build_row(offer: dict, venue: dict, image_url: str, today: str) -> dict:
     # jours = [], 00:00 / 00:00, is_active=false (section "Incomplete offers" du BO).
     days = offer["days_of_week"] if active else (offer["days_of_week"] or [])
     both_times = bool(offer["start_time"] and offer["end_time"])
-    start_t, end_t = (offer["start_time"], offer["end_time"]) if both_times else ("00:00:00", "00:00:00")
+    if both_times:
+        start_t, end_t = offer["start_time"], offer["end_time"]
+    elif settings.ALLDAY_CONVENTION_ENABLED and offer["days_of_week"]:
+        # "All day" (convention BO) seulement si les jours sont connus ; l'offre reste INACTIVE (verification staff).
+        start_t, end_t = "00:00:00", "23:59:00"
+    else:
+        start_t, end_t = "00:00:00", "00:00:00"
     return {
         "id_venue": venue["id_venue"],
         "kind": offer["kind"],
