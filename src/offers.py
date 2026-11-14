@@ -191,15 +191,19 @@ def _same_day_key_missing(offer: dict) -> bool:
 
 def build_row(offer: dict, venue: dict, image_url: str, today: str) -> dict:
     active = bool(offer["days_of_week"] and offer["start_time"] and offer["end_time"])
+    # Option B (decision BO/Katia) : colonnes NOT NULL. Jours ou heures inconnus ->
+    # jours = [], 00:00 / 00:00, is_active=false (section "Incomplete offers" du BO).
+    days = offer["days_of_week"] if active else (offer["days_of_week"] or [])
+    start_t, end_t = (offer["start_time"], offer["end_time"]) if active else ("00:00:00", "00:00:00")
     return {
         "id_venue": venue["id_venue"],
         "kind": offer["kind"],
         "title": offer["title"],
         "description": offer["description"],
         "image_url": image_url or None,
-        "days_of_week": offer["days_of_week"] or None,
-        "start_time": offer["start_time"],
-        "end_time": offer["end_time"],
+        "days_of_week": days,
+        "start_time": start_t,
+        "end_time": end_t,
         # Dates : celles du post si elles existent ; sinon debut = jour du scrape,
         # fin = fin du mois en cours (regle validee avec Katia).
         "start_date": offer.get("start_date") or today,
@@ -222,6 +226,10 @@ def process_record(record: dict, today: str, write: bool) -> dict:
     offer = extract_offer(caption, venue_name, today)
     if not offer:
         return {"action": "skip", "note": "pas une offre recurrente"}
+
+    only = settings.OFFERS_ONLY_VENUES
+    if only and venue_name.strip().lower() not in only:
+        return {"action": "held", "note": f"{venue_name} (en attente de validation BO)", "offer": offer}
 
     venue, reason = ps._find_venue(handle, venue_name)
     if not venue:

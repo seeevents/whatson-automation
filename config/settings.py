@@ -125,3 +125,5 @@ ACCOUNTS_SOURCE = os.environ.get("ACCOUNTS_SOURCE", "supabase").strip().lower()
 OFFERS_WRITE_ENABLED = os.environ.get("OFFERS_WRITE_ENABLED", "false").strip().lower() == "true"
 # Offres deja existantes : "verified_only" (premier passage valide par le BO : seul last_verified_at) ou "full".
 OFFERS_UPDATE_MODE = os.environ.get("OFFERS_UPDATE_MODE", "verified_only").strip().lower()
+# Si renseigne (noms de venues separes par "|"), seules ces venues sont traitees par les offres; les autres sont retenues.
+OFFERS_ONLY_VENUES = {v.strip().lower() for v in os.environ.get("OFFERS_ONLY_VENUES", "").split("|") if v.strip()}
