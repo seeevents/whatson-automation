@@ -290,7 +290,7 @@ def run(write: bool | None = None, lookback_days: int = LOOKBACK_DAYS) -> list[d
         try:
             res = process_record(rec, today, write)
         except Exception as exc:  # noqa: BLE001
-            res = {"action": "error", "note": f"{type(exc).__name__}: {str(exc)[:150]}"}
+            res = {"action": "error", "note": f"{type(exc).__name__}: {str(exc)[:600]}"}
         res["record_id"] = rec["id"]
         results.append(res)
     return results
