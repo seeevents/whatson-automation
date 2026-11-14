@@ -197,7 +197,8 @@ def build_row(offer: dict, venue: dict, image_url: str, today: str) -> dict:
     # Option B (decision BO/Katia) : colonnes NOT NULL. Jours ou heures inconnus ->
     # jours = [], 00:00 / 00:00, is_active=false (section "Incomplete offers" du BO).
     days = offer["days_of_week"] if active else (offer["days_of_week"] or [])
-    start_t, end_t = (offer["start_time"], offer["end_time"]) if active else ("00:00:00", "00:00:00")
+    both_times = bool(offer["start_time"] and offer["end_time"])
+    start_t, end_t = (offer["start_time"], offer["end_time"]) if both_times else ("00:00:00", "00:00:00")
     return {
         "id_venue": venue["id_venue"],
         "kind": offer["kind"],

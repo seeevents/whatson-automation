@@ -44,5 +44,5 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           OFFERS_WRITE_ENABLED: "true"
           # Retenues jusqu'a confirmation du back-office (retirer de la liste une fois confirme).
-          OFFERS_HOLD_VENUES: "Oldmans Bali|Bamboo Bar & Grill Kuta|Tabu Bali"
+          OFFERS_HOLD_VENUES: "Tabu Bali"
         run: python scripts/run_offers.py 2
