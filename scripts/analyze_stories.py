@@ -38,3 +38,14 @@ for r in allev:
     st = r["fields"].get(settings.FLD_STATUT); st = st.get("name") if isinstance(st, dict) else st
     tot[st] += 1
 print(f"::notice::toutes lignes Airtable sur la fenetre={len(allev)} | par statut={dict(tot)}")
+
+# Proxy : lignes sans legende (stories, mais aussi posts image-seule)
+nocap = at.search_records(settings.AIRTABLE_TABLE_EVENTS,
+    formula=f"AND(LEN({{{settings.FLD_LEGENDE}}}) = 0, {win})", max_records=100000)
+c2 = collections.Counter(); v2 = collections.defaultdict(collections.Counter)
+for r in nocap:
+    st = r["fields"].get(settings.FLD_STATUT); st = st.get("name") if isinstance(st, dict) else st
+    c2[st] += 1; v2[r["fields"].get(settings.FLD_VENUE_NAME, "?")][st] += 1
+print(f"::notice::lignes SANS legende (proxy stories)={len(nocap)} | par statut={dict(c2)}")
+good2 = {v: c for v, c in v2.items() if c.get("Rapporté", 0) + c.get("Validé", 0) > 0}
+print(f"::notice::venues avec >=1 event valide sans legende={len(good2)} / {len(v2)}")
