@@ -137,3 +137,132 @@ def extract_from_images(
         "date": result.get("date", ""),
         "alerte": result.get("alerte", ""),
     }
+
+
+# ---------------------------------------------------------------------------
+# Stories : prompt dedie + images/frames video + textes des stickers
+# ---------------------------------------------------------------------------
+import os
+import subprocess
+import tempfile
+
+MAX_VIDEO_BYTES = 40 * 1024 * 1024
+
+
+def _video_frames_b64(video_url: str, max_frames: int = 4) -> list[str]:
+    """Telecharge la video d'une story et en extrait quelques images (ffmpeg)."""
+    if not video_url:
+        return []
+    try:
+        resp = requests.get(video_url, timeout=60, stream=True)
+        resp.raise_for_status()
+        data = b""
+        for chunk in resp.iter_content(1024 * 256):
+            data += chunk
+            if len(data) > MAX_VIDEO_BYTES:
+                logger.warning("Video story trop lourde, ignoree")
+                return []
+    except requests.RequestException as exc:
+        logger.warning("Echec telechargement video story: %s", exc)
+        return []
+    frames: list[str] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "v.mp4")
+        with open(src, "wb") as fh:
+            fh.write(data)
+        # une image toutes les 2 s, max_frames images, largeur 720 px
+        cmd = ["ffmpeg", "-loglevel", "error", "-i", src, "-vf", "fps=1/2,scale=720:-2",
+               "-frames:v", str(max_frames), os.path.join(tmp, "f%02d.jpg")]
+        try:
+            subprocess.run(cmd, check=True, timeout=90)
+        except (subprocess.SubprocessError, FileNotFoundError) as exc:
+            logger.warning("ffmpeg indisponible/echec: %s", exc)
+            return []
+        for name in sorted(os.listdir(tmp)):
+            if name.endswith(".jpg"):
+                with open(os.path.join(tmp, name), "rb") as fh:
+                    frames.append(base64.b64encode(fh.read()).decode("utf-8"))
+    return frames
+
+
+def extract_from_story(
+    image_urls: list[str],
+    video_url: str = "",
+    stickers_text: str = "",
+    venue_name: str = "",
+    published_timestamp: str = "",
+) -> dict[str, str]:
+    """Analyse d'une story Instagram (image ou video) -> {titre, date, alerte}.
+    Pour une video, plusieurs images extraites + l'image de couverture sont envoyees."""
+    if not settings.GEMINI_API_KEY:
+        raise GeminiError("GEMINI_API_KEY manquant dans l'environnement.")
+
+    parts = []
+    for url in image_urls[:1]:
+        b64 = _download_image_b64(url)
+        if b64:
+            parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
+    for b64 in _video_frames_b64(video_url):
+        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
+    if not parts:
+        return {}
+
+    prompt = (
+        "Tu analyses une STORY Instagram (image, ou images extraites d'une video) publiee par "
+        f"le lieu/compte '{venue_name}' a Bali. "
+        f"{('Publiee le : ' + published_timestamp + ' (heure de Bali). ') if published_timestamp else ''}"
+        "Les stories annoncent souvent un evenement du jour ou des prochains jours avec un texte "
+        "stylise ou ecrit en surimpression (TONIGHT, THIS SATURDAY, LIVE MUSIC, DJ, LINE-UP, "
+        "OPENING, LADIES NIGHT, QUIZ, BRUNCH, PARTY, sport diffuse, etc.). Lis TOUT le texte visible "
+        "sur toutes les images, y compris petit, en bordure ou sur un fond charge. "
+        "Reponds uniquement si la story annonce un evenement, une soiree, un concert/DJ, une "
+        "animation, un tournoi, un evenement sportif diffuse, un atelier, une ouverture, ou une "
+        "offre limitee (happy hour, promo) avec un jour/une date. "
+        "DATE : convertis les mentions relatives par rapport a la date de publication "
+        "('TONIGHT'/'TODAY' = jour de publication, 'TOMORROW' = lendemain, 'THIS FRIDAY' = le "
+        "prochain vendredi, 'EVERY SUNDAY' = le prochain dimanche). Sans annee explicite, deduis "
+        "l'annee de la date de publication. Si seul le mois+jour est donne, utilise-le. "
+        "Si plusieurs jours, la date est le premier jour et le planning complet va dans alerte. "
+        "ALERTE : resume en une a trois phrases (en anglais) : artistes/DJ/line-up, horaires, "
+        "prix, reservation, lien ou code promo, tout detail utile. "
+        "TITRE : nom de l'evenement (pas juste le nom du lieu ou son @compte). "
+        "Si la story est un simple repost de photo, un plat/ambiance sans annonce, un remerciement "
+        "ou une pub sans evenement identifiable, renvoie des chaines vides pour les trois champs. "
+        "Reponds avec UN SEUL objet JSON : "
+        '{"titre": "...", "date": "YYYY-MM-DD", "alerte": "..."}'
+    )
+    if stickers_text:
+        prompt = f"Textes/liens des stickers de la story : {stickers_text}\n\n{prompt}"
+    parts.append({"text": prompt})
+
+    body = {
+        "contents": [{"parts": parts}],
+        "generationConfig": {
+            "thinkingConfig": {"thinkingLevel": "low"},
+            "responseMimeType": "application/json",
+        },
+    }
+    url = API_URL_TEMPLATE.format(model=settings.GEMINI_MODEL)
+    headers = {"Content-Type": "application/json", "x-goog-api-key": settings.GEMINI_API_KEY}
+    try:
+        resp = requests.post(url, headers=headers, json=body, timeout=TIMEOUT)
+        if not resp.ok:
+            raise GeminiError(f"{resp.status_code} {resp.reason}: {resp.text[:500]}")
+        data = resp.json()
+    except requests.RequestException as exc:
+        raise GeminiError(f"Erreur reseau: {exc}") from exc
+    try:
+        raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError) as exc:
+        raise GeminiError(f"Reponse Gemini inattendue: {data}") from exc
+    try:
+        result = json.loads(raw_text)
+        if isinstance(result, list):
+            result = result[0] if result else {}
+    except json.JSONDecodeError:
+        result = {}
+        for key in ("titre", "date", "alerte"):
+            m = re.search(rf'"{key}"\s*:\s*"((?:[^"\\]|\\.)*)"', raw_text)
+            if m:
+                result[key] = m.group(1)
+    return {k: (result.get(k) or "") for k in ("titre", "date", "alerte")}

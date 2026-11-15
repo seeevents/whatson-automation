@@ -166,6 +166,32 @@ def process_post(account: accounts.Account, post: dict) -> None:
     logger.info("Post traite: %s (%s, methode=%s)", post_url, "avec date" if date else "sans date", method)
 
 
+def _stickers_text(story: dict) -> str:
+    """Textes/liens presents dans les stickers de la story (utile pour billets, mentions)."""
+    out: list[str] = []
+
+    def walk(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k in ("url", "link_title", "display_url", "text", "title", "username", "name") and isinstance(v, str):
+                    if v and not v.startswith("https://scontent") and len(v) < 300:
+                        out.append(v)
+                else:
+                    walk(v)
+        elif isinstance(o, list):
+            for i in o:
+                walk(i)
+
+    for key in ("story_link_stickers", "story_bloks_stickers", "story_hashtags", "story_locations", "reel_mentions"):
+        walk(story.get(key))
+    seen, uniq = set(), []
+    for t in out:
+        if t not in seen:
+            seen.add(t)
+            uniq.append(t)
+    return " | ".join(uniq)[:600]
+
+
 def process_story(account: accounts.Account, story: dict) -> None:
     """Traite une story: dedup -> vision (toujours, pas de legende fiable) -> ecriture."""
     username = (story.get("user") or {}).get("username", "")
@@ -192,10 +218,29 @@ def process_story(account: accounts.Account, story: dict) -> None:
         except (ValueError, TypeError):
             pass
 
+    video_url = ""
+    for v in (story.get("video_versions") or []):
+        if v.get("url"):
+            video_url = v["url"]
+            break
+    stickers_text = _stickers_text(story)
+
     try:
-        vision_result = gemini_client.extract_from_images(image_candidates[:1], published_timestamp=published_timestamp)
+        vision_result = gemini_client.extract_from_story(
+            image_candidates[:1],
+            video_url=video_url,
+            stickers_text=stickers_text,
+            venue_name=account.venue_name,
+            published_timestamp=published_timestamp,
+        )
     except gemini_client.GeminiError as exc:
         logger.error("Echec vision pour story %s: %s", story_url, exc)
+        return
+
+    # Rien d'exploitable (repost, ambiance, pub sans annonce) : on ne cree pas de ligne vide
+    if not (vision_result.get("titre") or vision_result.get("alerte")):
+        dedup.mark_processed(story_url)
+        logger.info("Story sans evenement: %s", story_url)
         return
 
     # IMPORTANT: toujours utiliser l'image de couverture fixe (image_versions2), jamais l'URL
