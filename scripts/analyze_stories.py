@@ -14,15 +14,15 @@ posts_seen = at.search_records(settings.AIRTABLE_TABLE_DEDUP,
 print(f"::notice::fenetre {START} -> {END} | stories vues={len(seen)} | posts vus={len(posts_seen)}")
 
 evs = at.search_records(settings.AIRTABLE_TABLE_EVENTS,
-    formula=f"AND(FIND('[GEMINI VISION]', {{Alerte}}), {win})", max_records=100000)
+    formula=f"AND(FIND('[GEMINI VISION]', {{{settings.FLD_ALERTE}}}), {win})", max_records=100000)
 by_status = collections.Counter()
 by_venue = collections.defaultdict(collections.Counter)
 for r in evs:
     f = r["fields"]
-    st = f.get("Statut")
+    st = f.get(settings.FLD_STATUT)
     st = st.get("name") if isinstance(st, dict) else st
     by_status[st] += 1
-    by_venue[f.get("Venue Name", "?")][st] += 1
+    by_venue[f.get(settings.FLD_VENUE_NAME, "?")][st] += 1
 print(f"::notice::events issus de stories (lignes Airtable)={len(evs)} | par statut={dict(by_status)}")
 good = {v: c for v, c in by_venue.items() if c.get("Validé", 0) + c.get("Rapporté", 0) > 0}
 print(f"::notice::venues avec >=1 event valide issu d'une story={len(good)} sur {len(by_venue)} venues ayant produit au moins une ligne")
@@ -35,6 +35,6 @@ print(f"::notice::events valides issus de stories={valid_total} | de posts (tout
 allev = at.search_records(settings.AIRTABLE_TABLE_EVENTS, formula=f"AND({win})", max_records=100000)
 tot = collections.Counter()
 for r in allev:
-    st = r["fields"].get("Statut"); st = st.get("name") if isinstance(st, dict) else st
+    st = r["fields"].get(settings.FLD_STATUT); st = st.get("name") if isinstance(st, dict) else st
     tot[st] += 1
 print(f"::notice::toutes lignes Airtable sur la fenetre={len(allev)} | par statut={dict(tot)}")
