@@ -10,6 +10,9 @@ jobs:
   publication-direct:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: write   # declenche le passage hebdomadaire des offres (offers_scrape.yml)
     steps:
       - uses: actions/checkout@v4
 
@@ -48,3 +51,9 @@ jobs:
           # Retenues jusqu'a confirmation du back-office (retirer de la liste une fois confirme).
           OFFERS_HOLD_VENUES: ""
         run: python scripts/run_offers.py 2
+
+      - name: Declencher le passage des offres du jour (par batch)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run offers_scrape.yml --repo ${{ github.repository }} --ref main -f write=true
