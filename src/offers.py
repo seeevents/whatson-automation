@@ -138,6 +138,14 @@ def _mark_default_end(id_offer: str, end_date: str) -> None:
         logger.warning("Marqueur fin par defaut non enregistre (%s)", type(exc).__name__)
 
 
+def _mark_created(id_offer: str) -> None:
+    """Memorise que cette offre a ete creee par l'automatisation (suivi des offres non reconfirmees)."""
+    try:
+        dedup.mark_processed(f"offer-wo:{id_offer}")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Marqueur de creation non enregistre (%s)", type(exc).__name__)
+
+
 def _end_is_default(id_offer: str, end_date: str) -> bool:
     try:
         return dedup.already_processed(_marker(id_offer, end_date))
@@ -226,11 +234,14 @@ def build_row(offer: dict, venue: dict, image_url: str, today: str) -> dict:
 def process_record(record: dict, today: str, write: bool) -> dict:
     """Traite une ligne Airtable. Retourne {'action', 'note', 'offer'}."""
     f = record["fields"]
-    caption = f.get(settings.FLD_LEGENDE, "") or ""
-    venue_name = f.get(settings.FLD_VENUE_NAME, "") or ""
-    handle = ps._normalize_handle(f.get(settings.FLD_INSTAGRAM, "") or "")
-    image_url = f.get(settings.FLD_IMAGE_URL, "") or ""
+    return process_source(
+        f.get(settings.FLD_LEGENDE, "") or "", f.get(settings.FLD_VENUE_NAME, "") or "",
+        ps._normalize_handle(f.get(settings.FLD_INSTAGRAM, "") or ""),
+        f.get(settings.FLD_IMAGE_URL, "") or "", today, write)
 
+
+def process_source(caption: str, venue_name: str, handle: str, image_url: str, today: str, write: bool) -> dict:
+    """Coeur du traitement d'une legende (ligne Airtable ou post scrape directement)."""
     if not _prefilter_ok(caption):
         return {"action": "skip", "note": "aucun mot-cle d'offre"}
     offer = extract_offer(caption, venue_name, today)
@@ -265,20 +276,16 @@ def process_record(record: dict, today: str, write: bool) -> dict:
         # Modifiee a la main depuis notre derniere ecriture ? -> seulement last_verified_at.
         manual = _edited_by_hand(existing)
         patch = {"last_verified_at": now}
-        if not manual and settings.OFFERS_UPDATE_MODE == "full":
+        if not manual:
             cur_end = existing.get("end_date")
-            if offer["explicit_end"]:
-                patch["end_date"] = offer["end_date"]          # dates du post : telles quelles
-            elif cur_end and cur_end < row["end_date"] and _end_is_default(existing["id_offer"], cur_end):
-                patch["end_date"] = row["end_date"]            # prolongation: fin posee par defaut par nous
-            # champs vides seulement (jamais d'ecrasement)
-            for k in ("description", "end_time", "image_url"):
-                if row.get(k) and not existing.get(k):
-                    patch[k] = row[k]
+            # Prolongation UNIQUEMENT si c'est nous qui avions pose cette fin par defaut.
+            # Une fin venant d'un post, ou posee a la main, n'est jamais modifiee.
+            if cur_end and cur_end < row["end_date"] and _end_is_default(existing["id_offer"], cur_end):
+                patch["end_date"] = row["end_date"]
         if write:
             ps._request("PATCH", "venue_offers", params={"id_offer": f"eq.{existing['id_offer']}"},
                         json_body=patch, prefer="return=minimal")
-            if "end_date" in patch and not offer["explicit_end"]:
+            if "end_date" in patch:
                 _mark_default_end(existing["id_offer"], patch["end_date"])
         return {"action": "update_verified_only" if manual else "update", "note": venue_name, "offer": row,
                 "id": existing["id_offer"]}
@@ -291,6 +298,7 @@ def process_record(record: dict, today: str, write: bool) -> dict:
             row["image_url"] = None
     if write:
         ps._request("POST", "venue_offers", json_body=row, prefer="return=minimal")
+        _mark_created(row["id_offer"])
         if not offer["explicit_end"]:
             _mark_default_end(row["id_offer"], row["end_date"])
     return {"action": "create", "note": venue_name, "offer": row}
@@ -312,3 +320,16 @@ def run(write: bool | None = None, lookback_days: int = LOOKBACK_DAYS) -> list[d
         res["record_id"] = rec["id"]
         results.append(res)
     return results
+
+
+STALE_DAYS = 21  # 3 passages hebdomadaires consecutifs sans reconfirmation
+
+
+def stale_offers(today: str | None = None) -> list[dict]:
+    """Offres creees par l'automatisation, encore valides, non reconfirmees depuis 3 passages. Lecture seule."""
+    today = today or datetime.now(settings.BALI_TZ).strftime("%Y-%m-%d")
+    limit = (datetime.now(timezone.utc) - timedelta(days=STALE_DAYS)).isoformat()
+    rows = ps._request("GET", "venue_offers", params={
+        "select": "id_offer,id_venue,title,kind,end_date,last_verified_at,is_active",
+        "end_date": f"gte.{today}", "last_verified_at": f"lt.{limit}", "limit": "1000"}) or []
+    return [r for r in rows if dedup.already_processed(f"offer-wo:{r['id_offer']}")]
